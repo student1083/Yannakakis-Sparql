@@ -39,6 +39,11 @@ public final class Relation {
         return new Relation(schema, new HashSet<>());
     }
 
+    /** Build a relation directly from materialized rows of RDF nodes. */
+    public static Relation fromRows(Set<Var> schema, Set<Map<Var, Node>> rows) {
+        return new Relation(schema, rows);
+    }
+
     /** The join identity: one empty tuple. Used for an empty BGP. */
     public static Relation unit() {
         Set<Map<Var, Node>> r = new HashSet<>();
