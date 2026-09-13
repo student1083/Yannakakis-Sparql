@@ -70,4 +70,19 @@ This file feeds Chapter 4.
   section is stale re: `YannakakisQueryEngine`/`YannakakisTransform` (describes them as
   abandoned-but-present; they were deleted in step 3) so the new doc reflects current reality
   instead. `mvn test` not re-run (docs-only change, no code touched); last known-green run was
-  step 3's `mvn test -Dtest=DifferentialTest`.
+  step 3's `mvn test -Dtest=DifferentialTest`.- Step 5 (`AlgebraContextAnalyzer`): `docs/recovery-audit.md` confirms no prior version ever
+  existed in history, so this is a fresh build, not a restore. Implemented as a top-down
+  "demand" walk implementing `OpVisitor` directly (not `OpVisitorBase`) so every operator must
+  be handled explicitly and a future ARQ operator breaks compilation instead of silently
+  skipping a BGP. `OpProject` and `OpGroup` are the only operators that *reset* the demand
+  (they genuinely hide everything else under SPARQL semantics); every other rule only adds.
+  Sibling variables use `OpVars.mentionedVars`, which ignores scoping and therefore can only
+  over-approximate. `OpMinus`/`OpSemiJoin`/`OpAntiJoin` right operands get exactly the left
+  side's mentioned variables (they never contribute output). Fallback to all variables (with a
+  counted `FallbackReason`) for `OpExt`, `OpService`, `OpPropFunc`, `OpProcedure`. Lookup of a
+  BGP object that was never analysed also yields all variables — this matters because ARQ
+  manufactures fresh `OpBGP` objects at execution time (quad patterns in `OpExecutor`, and the
+  `Substitute`d right side of `QueryIterOptionalIndex`), so identity keying will miss those.
+  Expected sets in the tests were pinned against `Algebra.compile` output printed for each
+  query beforehand. Not wired into `YannakakisOpExecutor` yet (no executor code touched).
+  `mvn test`: 68/68 green.
