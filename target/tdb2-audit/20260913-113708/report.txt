@@ -1,0 +1,827 @@
+Jena ARQ version: 6.0.0
+TDB2 store dir: G:\dev\yannakakis-sparql\target\tdb2-audit\20260913-113708\store
+TDB2 dataset class: org.apache.jena.tdb2.store.DatasetGraphSwitchable
+TDB2 dataset ctx factory: org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+mem dataset class: org.apache.jena.sparql.core.DatasetGraphMap
+mem dataset ctx factory: <null> (-> OpExecutor.stdFactory)
+global ARQ ctx factory (before register): <null> (-> OpExecutor.stdFactory)
+global ARQ ctx stage generator: at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40
+global optFilterPlacement: null optFilterPlacementBGP: null
+
+==================================================================
+E. in-memory Model via QueryExecutionFactory.create(q, model), register() (control, as existing tests)
+==================================================================
+--- query: default-bgp
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (bgp
+          (triple ?a <http://example.org/knows> ?b)
+          (triple ?b <http://example.org/livesIn> ?c)
+        )
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: filter-last-var
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?c != ex:graz )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (filter (!= ?c <http://example.org/graz>)
+          (bgp
+            (triple ?a <http://example.org/knows> ?b)
+            (triple ?b <http://example.org/livesIn> ?c)
+          ))
+  rows (1)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna]
+
+--- query: filter-first-var
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  yannakakis invocations : 2
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?a != ex:c )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (sequence
+          (filter (!= ?a <http://example.org/c>)
+            (bgp (triple ?a <http://example.org/knows> ?b)))
+          (bgp (triple ?b <http://example.org/livesIn> ?c)))
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: cyclic-triangle
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  yannakakis invocations : 0
+  stage generator calls  : 
+      stageGenerator(StageGeneratorDirectTDB) size=3 activeGraph=org.apache.jena.memvalue.GraphMemValue
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?x  ex:knows  ?y .
+            ?y  ex:knows  ?z .
+            ?x  ex:knows  ?z
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (bgp
+          (triple ?x <http://example.org/knows> ?y)
+          (triple ?y <http://example.org/knows> ?z)
+          (triple ?x <http://example.org/knows> ?z)
+        )
+      [main] INFO org.apache.jena.arq.exec - BGP
+        ?x <http://example.org/knows> ?y
+        ?y <http://example.org/knows> ?z
+        ?x <http://example.org/knows> ?z
+      [main] INFO org.apache.jena.arq.exec - Reorder/generic
+        ?x <http://example.org/knows> ?y
+        ?y <http://example.org/knows> ?z
+        ?x <http://example.org/knows> ?z
+  rows (0)           : []
+
+==================================================================
+B. TDB2 dataset, nothing registered (baseline)
+==================================================================
+--- query: default-bgp
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+          (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+          (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?a <http://example.org/knows> ?b
+        ?b <http://example.org/livesIn> ?c
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: graph-named
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { GRAPH ex:g1
+              { ?a  ex:knows    ?b .
+                ?b  ex:livesIn  ?c
+              }
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <http://example.org/g1> ?a <http://example.org/knows> ?b)
+          (quad <http://example.org/g1> ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (quadpattern
+          (quad <http://example.org/g1> ?a <http://example.org/knows> ?b)
+          (quad <http://example.org/g1> ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?a <http://example.org/knows> ?b
+        ?b <http://example.org/livesIn> ?c
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: graph-var
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { GRAPH ?g
+              { ?a  ex:knows    ?b .
+                ?b  ex:livesIn  ?c
+              }
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad ?g ?a <http://example.org/knows> ?b)
+          (quad ?g ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (quadpattern
+          (quad ?g ?a <http://example.org/knows> ?b)
+          (quad ?g ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?a <http://example.org/knows> ?b
+        ?b <http://example.org/livesIn> ?c
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna | g=http://example.org/g1, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz | g=http://example.org/g1]
+
+--- query: filter-last-var
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?c != ex:graz )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (filter (!= ?c <http://example.org/graz>)
+          (quadpattern
+            (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+            (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+          ))
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (filter (!= ?c <http://example.org/graz>)
+          (quadpattern
+            (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+            (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+          ))
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?a <http://example.org/knows> ?b
+        ?b <http://example.org/livesIn> ?c
+  rows (1)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna]
+
+--- query: filter-first-var
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?a != ex:c )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (sequence
+          (filter (!= ?a <http://example.org/c>)
+            (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)))
+          (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)))
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (sequence
+          (filter (!= ?a <http://example.org/c>)
+            (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)))
+          (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)))
+      [main] INFO org.apache.jena.arq.exec - Execute ::   ?a <http://example.org/knows> ?b
+      [main] INFO org.apache.jena.arq.exec - Execute ::   ?b <http://example.org/livesIn> ?c
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: cyclic-triangle
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?x  ex:knows  ?y .
+            ?y  ex:knows  ?z .
+            ?x  ex:knows  ?z
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?y)
+          (quad <urn:x-arq:DefaultGraphNode> ?y <http://example.org/knows> ?z)
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?z)
+        )
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?y)
+          (quad <urn:x-arq:DefaultGraphNode> ?y <http://example.org/knows> ?z)
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?z)
+        )
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?x <http://example.org/knows> ?y
+        ?y <http://example.org/knows> ?z
+        ?x <http://example.org/knows> ?z
+  rows (0)           : []
+
+==================================================================
+A. TDB2 dataset, YannakakisOpExecutor.register() (global ARQ context)
+==================================================================
+--- query: default-bgp
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+          (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+          (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?a <http://example.org/knows> ?b
+        ?b <http://example.org/livesIn> ?c
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: graph-named
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { GRAPH ex:g1
+              { ?a  ex:knows    ?b .
+                ?b  ex:livesIn  ?c
+              }
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <http://example.org/g1> ?a <http://example.org/knows> ?b)
+          (quad <http://example.org/g1> ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (quadpattern
+          (quad <http://example.org/g1> ?a <http://example.org/knows> ?b)
+          (quad <http://example.org/g1> ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?a <http://example.org/knows> ?b
+        ?b <http://example.org/livesIn> ?c
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: graph-var
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { GRAPH ?g
+              { ?a  ex:knows    ?b .
+                ?b  ex:livesIn  ?c
+              }
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad ?g ?a <http://example.org/knows> ?b)
+          (quad ?g ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (quadpattern
+          (quad ?g ?a <http://example.org/knows> ?b)
+          (quad ?g ?b <http://example.org/livesIn> ?c)
+        )
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?a <http://example.org/knows> ?b
+        ?b <http://example.org/livesIn> ?c
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna | g=http://example.org/g1, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz | g=http://example.org/g1]
+
+--- query: filter-last-var
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?c != ex:graz )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (filter (!= ?c <http://example.org/graz>)
+          (quadpattern
+            (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+            (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+          ))
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (filter (!= ?c <http://example.org/graz>)
+          (quadpattern
+            (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+            (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+          ))
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?a <http://example.org/knows> ?b
+        ?b <http://example.org/livesIn> ?c
+  rows (1)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna]
+
+--- query: filter-first-var
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?a != ex:c )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (sequence
+          (filter (!= ?a <http://example.org/c>)
+            (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)))
+          (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)))
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (sequence
+          (filter (!= ?a <http://example.org/c>)
+            (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)))
+          (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)))
+      [main] INFO org.apache.jena.arq.exec - Execute ::   ?a <http://example.org/knows> ?b
+      [main] INFO org.apache.jena.arq.exec - Execute ::   ?b <http://example.org/livesIn> ?c
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: cyclic-triangle
+  factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
+  executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?x  ex:knows  ?y .
+            ?y  ex:knows  ?z .
+            ?x  ex:knows  ?z
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?y)
+          (quad <urn:x-arq:DefaultGraphNode> ?y <http://example.org/knows> ?z)
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?z)
+        )
+      [main] INFO org.apache.jena.arq.exec - TDB2
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?y)
+          (quad <urn:x-arq:DefaultGraphNode> ?y <http://example.org/knows> ?z)
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?z)
+        )
+      [main] INFO org.apache.jena.arq.exec - Execute
+        ?x <http://example.org/knows> ?y
+        ?y <http://example.org/knows> ?z
+        ?x <http://example.org/knows> ?z
+  rows (0)           : []
+
+==================================================================
+C. TDB2 dataset, factory set on the DATASET context only (proposed fix, probe only)
+==================================================================
+--- query: default-bgp
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+          (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+        )
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: graph-named
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { GRAPH ex:g1
+              { ?a  ex:knows    ?b .
+                ?b  ex:livesIn  ?c
+              }
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <http://example.org/g1> ?a <http://example.org/knows> ?b)
+          (quad <http://example.org/g1> ?b <http://example.org/livesIn> ?c)
+        )
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: graph-var
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { GRAPH ?g
+              { ?a  ex:knows    ?b .
+                ?b  ex:livesIn  ?c
+              }
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad ?g ?a <http://example.org/knows> ?b)
+          (quad ?g ?b <http://example.org/livesIn> ?c)
+        )
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna | g=http://example.org/g1, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz | g=http://example.org/g1]
+
+--- query: filter-last-var
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?c != ex:graz )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (filter (!= ?c <http://example.org/graz>)
+          (quadpattern
+            (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)
+            (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)
+          ))
+  rows (1)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna]
+
+--- query: filter-first-var
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 2
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?a != ex:c )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (sequence
+          (filter (!= ?a <http://example.org/c>)
+            (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?a <http://example.org/knows> ?b)))
+          (quadpattern (quad <urn:x-arq:DefaultGraphNode> ?b <http://example.org/livesIn> ?c)))
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: cyclic-triangle
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : 
+      stageGenerator(StageGeneratorDirectTDB) size=3 activeGraph=org.apache.jena.tdb2.store.GraphTDB
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?x  ex:knows  ?y .
+            ?y  ex:knows  ?z .
+            ?x  ex:knows  ?z
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (quadpattern
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?y)
+          (quad <urn:x-arq:DefaultGraphNode> ?y <http://example.org/knows> ?z)
+          (quad <urn:x-arq:DefaultGraphNode> ?x <http://example.org/knows> ?z)
+        )
+  rows (0)           : []
+
+==================================================================
+D. in-memory general Dataset, YannakakisOpExecutor.register() (control)
+==================================================================
+--- query: default-bgp
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (bgp
+          (triple ?a <http://example.org/knows> ?b)
+          (triple ?b <http://example.org/livesIn> ?c)
+        )
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: graph-named
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { GRAPH ex:g1
+              { ?a  ex:knows    ?b .
+                ?b  ex:livesIn  ?c
+              }
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (graph <http://example.org/g1>
+          (bgp
+            (triple ?a <http://example.org/knows> ?b)
+            (triple ?b <http://example.org/livesIn> ?c)
+          ))
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: graph-var
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { GRAPH ?g
+              { ?a  ex:knows    ?b .
+                ?b  ex:livesIn  ?c
+              }
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (graph ?g
+          (bgp
+            (triple ?a <http://example.org/knows> ?b)
+            (triple ?b <http://example.org/livesIn> ?c)
+          ))
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna | g=http://example.org/g1, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz | g=http://example.org/g1]
+
+--- query: filter-last-var
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 1
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?c != ex:graz )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (filter (!= ?c <http://example.org/graz>)
+          (bgp
+            (triple ?a <http://example.org/knows> ?b)
+            (triple ?b <http://example.org/livesIn> ?c)
+          ))
+  rows (1)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna]
+
+--- query: filter-first-var
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 2
+  stage generator calls  : <none>
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?a  ex:knows    ?b .
+            ?b  ex:livesIn  ?c
+            FILTER ( ?a != ex:c )
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (sequence
+          (filter (!= ?a <http://example.org/c>)
+            (bgp (triple ?a <http://example.org/knows> ?b)))
+          (bgp (triple ?b <http://example.org/livesIn> ?c)))
+  rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
+
+--- query: cyclic-triangle
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000257d0240598 [== YannakakisOpExecutor.FACTORY]
+  executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000257d023cc40 (wrapped by the audit recorder)
+  dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
+  yannakakis invocations : 0
+  stage generator calls  : 
+      stageGenerator(StageGeneratorDirectTDB) size=3 activeGraph=org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper
+  explain log (stderr)   :
+      [main] INFO org.apache.jena.arq.exec - QUERY
+        PREFIX  ex:   <http://example.org/>
+        
+        SELECT  *
+        WHERE
+          { ?x  ex:knows  ?y .
+            ?y  ex:knows  ?z .
+            ?x  ex:knows  ?z
+          }
+      [main] INFO org.apache.jena.arq.exec - ALGEBRA
+        (bgp
+          (triple ?x <http://example.org/knows> ?y)
+          (triple ?y <http://example.org/knows> ?z)
+          (triple ?x <http://example.org/knows> ?z)
+        )
+      [main] INFO org.apache.jena.arq.exec - BGP
+        ?x <http://example.org/knows> ?y
+        ?y <http://example.org/knows> ?z
+        ?x <http://example.org/knows> ?z
+      [main] INFO org.apache.jena.arq.exec - Reorder/generic
+        ?x <http://example.org/knows> ?y
+        ?y <http://example.org/knows> ?z
+        ?x <http://example.org/knows> ?z
+  rows (0)           : []
+

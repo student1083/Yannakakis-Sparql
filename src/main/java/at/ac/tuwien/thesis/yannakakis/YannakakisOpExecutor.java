@@ -107,9 +107,19 @@ public class YannakakisOpExecutor extends OpExecutor {
             int id = 0;
             for (Triple t : bound) rels.put(id++, matchTriple(graph, t));
 
-            // 4. evaluate (Yannakakis if acyclic, else a safe fold-join)
+            // 4. evaluate via Yannakakis; jt is never empty here. Lemma: binding
+            // variables to constants only deletes vertices from the query
+            // hypergraph and never adds any, so if the unsubstituted pattern
+            // (checked acyclic in execute() above) has a join tree, that same
+            // tree's running-intersection property survives for every vertex
+            // remaining after substitution. Hence GyoReduction.decompose on the
+            // substituted pattern always returns a non-empty Optional; see
+            // GyoReductionTest#acyclicityPreservedUnderBinding.
             Relation result = jt.map(tree -> YannakakisEvaluator.evaluate(tree, rels))
-                    .orElseGet(() -> naiveFold(rels));
+                    .orElseThrow(() -> new IllegalStateException(
+                            "unreachable: binding variables to constants only deletes hypergraph "
+                                    + "vertices, never adds any, so an acyclic BGP's join tree survives "
+                                    + "substitution intact (see GyoReductionTest#acyclicityPreservedUnderBinding)"));
 
             // 5. extend the input binding with each result row
             List<Binding> out = new ArrayList<>(result.rowCount());
@@ -196,9 +206,4 @@ public class YannakakisOpExecutor extends OpExecutor {
         return prev.equals(value);
     }
 
-    private static Relation naiveFold(Map<Integer, Relation> rels) {
-        Relation acc = null;
-        for (Relation r : rels.values()) acc = (acc == null) ? r : acc.join(r);
-        return acc == null ? Relation.unit() : acc;
-    }
 }

@@ -1,4 +1,4 @@
-# Implementation inventory
+ # Implementation inventory
 
 Snapshot of `at.ac.tuwien.thesis.yannakakis` as of the deletion of the abandoned
 `YannakakisQueryEngine`/`YannakakisTransform` scaffold (see `docs/today.md`, step 3).
@@ -113,8 +113,8 @@ Traced through `YannakakisOpExecutor.java`.
   Fusion rules from Wang et al. do not transfer to RDF. Never implement them." No detection or
   shortcut for such relationships exists in `YannakakisEvaluator`, `GyoReduction`, or `Relation`
   — every join tree edge goes through the full three-phase pass unconditionally.
-- **Hyperedge width capped at 3.** `CLAUDE.md` hard rule: "RDF triples limit hyperedge width to
-  3." Structurally enforced in `QueryHypergraph.fromBasicPattern` (`:66-77`), which only ever
+- **Hyperedge rank capped at 3.** `CLAUDE.md` hard rule: "RDF triples limit hyperedge rank
+  (arity) to 3." Structurally enforced in `QueryHypergraph.fromBasicPattern` (`:66-77`), which only ever
   inspects `t.getSubject()`, `t.getPredicate()`, `t.getObject()` — a hyperedge (one triple
   pattern) carries at most 3 distinct variables, unlike the paper's arbitrary-arity relational
   hyperedges.

@@ -91,10 +91,24 @@ There are no external RDF/query fixture files — every model and query is built
   Never via algebra rewriting / `Transform` on the algebra tree.
   ARQ has no native semijoin operator, so semijoin passes must run at
   execution time. This distinction appears throughout the thesis.
-- Scope is SELECT DISTINCT only (set semantics). No multiset/bag support.
-- PK-FK and Dimension Fusion rules from Wang et al. do not transfer to
-  RDF. Never implement them.
-- RDF triples limit hyperedge width to 3.
+- A BGP's answer under SPARQL semantics is already a set of mappings, so
+  the evaluator's set semantics (`Relation` as `HashSet`) is exact for
+  every SPARQL query, not only `SELECT DISTINCT` — this is not a
+  restriction we impose, only a fact about full-BGP evaluation. The
+  restriction becomes real once we project early (duplicates then need
+  multiplicities to reconstruct bag semantics correctly). No multiset/bag
+  support until step 10 lifts this via counting-semiring annotations.
+- Cycle elimination, aggregation elimination and semi-join elimination in
+  Wang et al. section 5.1 all rely on primary-key or foreign-key
+  constraints. RDF has no schema-level keys, so these do not transfer. Do
+  not implement them. (Note in passing that `owl:FunctionalProperty` and
+  `owl:InverseFunctionalProperty` are a partial analogue, but they are out
+  of scope.)
+- Fusion of dimension relations is cardinality-based, not key-based. It
+  does transfer to RDF and is in scope. See step 11 of
+  docs/claude-code-plan.md.
+- RDF triples limit hyperedge rank (arity) to 3. "Width" is reserved for
+  hypertree width in this project — never use it for hyperedge arity.
 
 ## Verified Jena 6 API (do not guess these)
 
