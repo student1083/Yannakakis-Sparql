@@ -33,3 +33,14 @@ OPTIONAL handling. Anything touching multiset semantics.
 
 Append one line per non-obvious choice made today, with the reason.
 This file feeds Chapter 4.
+
+- Step 1 (verify ARQ integration executes via `QC.setFactory` + normal ARQ
+  entry point + Yannakakis-path assertion): no new test added.
+  `YannakakisOpExecutorTest#executorActuallyFiresOnAcyclicBgp` and
+  `DifferentialTest.Wrappers#distinct` already do exactly this (register via
+  `YannakakisOpExecutor.register()` → `QC.setFactory`, run through
+  `QueryExecutionFactory.create(...).execSelect()`, assert
+  `invocations() >= 1`; the latter uses an actual `SELECT DISTINCT` query
+  against stock ARQ as oracle). Confirmed green via
+  `mvn test -Dtest=YannakakisOpExecutorTest,DifferentialTest` (29/29 passed).
+  Adding a separate test would have duplicated existing coverage.
