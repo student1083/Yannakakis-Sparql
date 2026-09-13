@@ -81,6 +81,7 @@ public class YannakakisOpExecutor extends OpExecutor {
 
     private static final class Stage extends QueryIterRepeatApply {
         private final BasicPattern pattern;
+        private final Map<Object, Optional<JoinTree>> joinTreeCache = new HashMap<>();
 
         Stage(BasicPattern pattern, QueryIterator input, ExecutionContext execCxt) {
             super(input, execCxt);
@@ -93,9 +94,12 @@ public class YannakakisOpExecutor extends OpExecutor {
             BasicPattern bound = new BasicPattern();
             for (Triple t : pattern) bound.add(substitute(t, binding));
 
-            // 2. build hypergraph + join tree of the (substituted) BGP
-            Optional<JoinTree> jt =
-                    GyoReduction.decompose(QueryHypergraph.fromBasicPattern(bound));
+            // 2. build hypergraph + join tree of the (substituted) BGP; the tree only
+            // depends on the BGP's shape (which positions are variables and which
+            // variables they are), not on the concrete bound node values, so it is
+            // cached per shape for the lifetime of this Stage.
+            Optional<JoinTree> jt = joinTreeCache.computeIfAbsent(shapeKey(bound),
+                    k -> GyoReduction.decompose(QueryHypergraph.fromBasicPattern(bound)));
 
             // 3. materialize each pattern against the live graph
             Graph graph = getExecContext().getActiveGraph();
@@ -119,6 +123,29 @@ public class YannakakisOpExecutor extends OpExecutor {
     }
 
     // ---- helpers ---------------------------------------------------------
+
+    /** Marks a non-variable (concrete term) position in a BGP shape key. */
+    private static final Object CONST = new Object();
+
+    /**
+     * Shape key for the join-tree cache: for each triple, the kind of each position
+     * (variable, or concrete term) and, for variables, the variable identity. Two
+     * bound BGPs that bind the same set of variables in the same triple positions
+     * produce equal keys regardless of which concrete nodes they were bound to.
+     */
+    private static Object shapeKey(BasicPattern bound) {
+        List<Object> key = new ArrayList<>(bound.size() * 3);
+        for (Triple t : bound) {
+            key.add(shapeOf(t.getSubject()));
+            key.add(shapeOf(t.getPredicate()));
+            key.add(shapeOf(t.getObject()));
+        }
+        return key;
+    }
+
+    private static Object shapeOf(Node n) {
+        return Var.isVar(n) ? Var.alloc(n) : CONST;
+    }
 
     private static Triple substitute(Triple t, Binding b) {
         return Triple.create(sub(t.getSubject(), b), sub(t.getPredicate(), b), sub(t.getObject(), b));

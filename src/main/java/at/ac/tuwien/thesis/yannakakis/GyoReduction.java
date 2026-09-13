@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * GYO (Graham–Yu–Özsoyoğlu) reduction.
@@ -27,8 +28,16 @@ public final class GyoReduction {
 
     private GyoReduction() {}
 
+    private static final AtomicInteger DECOMPOSE_CALLS = new AtomicInteger();
+
+    /** Test-only instrumentation: number of times {@link #decompose} has run. */
+    public static int decomposeCallCount() { return DECOMPOSE_CALLS.get(); }
+
+    public static void resetDecomposeCallCount() { DECOMPOSE_CALLS.set(0); }
+
     /** @return the join tree if alpha-acyclic, empty if cyclic. */
     public static Optional<JoinTree> decompose(QueryHypergraph h) {
+        DECOMPOSE_CALLS.incrementAndGet();
         Map<Integer, Set<Var>> edgeVars = new LinkedHashMap<>();
         Map<Integer, QueryHypergraph.Hyperedge> edgeById = new LinkedHashMap<>();
         for (QueryHypergraph.Hyperedge e : h.edges()) {
