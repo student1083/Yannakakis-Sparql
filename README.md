@@ -49,24 +49,11 @@ A one-row result plus "Jena ... is working" confirms the toolchain.
 ```
 src/main/java/at/ac/tuwien/thesis/yannakakis/
   SmokeTest.java               # toolchain check (run this first)
-  YannakakisQueryEngine.java   # custom ARQ engine + registration (the hook)
-  YannakakisTransform.java     # GYO + join tree + rewrite  <-- June work goes here
 ```
 
 ## Integration approach
 
-This project depends on `jena-arq` and plugs into ARQ's documented extension
-points (`QueryEngineFactory` + `QueryEngineRegistry`, overriding
-`QueryEngineMain.modifyOp`). No fork of Jena is required — the rewriting operates
-directly on the `Op` algebra tree, which is exactly the "deep but surgical"
-integration described in the thesis.
-
-To switch the engine on, call `YannakakisQueryEngine.register()` at startup;
-`unregister()` restores stock ARQ (handy for A/B benchmarking later).
-
-## Next milestones
-
-- **June:** implement `YannakakisTransform` (acyclicity test, join tree, rewrite).
-- **July:** fix bugs, start benchmarking.
-- **August:** load SP2Bench / BSBM / DBpedia into TDB2 (needs the Jena binary
-  distribution for the `tdb2.tdbloader` CLI), build the Python benchmark harness.
+`YannakakisOpExecutor` is registered as ARQ's `OpExecutor` via `QC.setFactory(...)` and
+intercepts each `OpBGP` at execution time: acyclic BGPs run through GYO decomposition +
+semijoin reduction + join; anything cyclic falls back to stock ARQ unchanged. See CLAUDE.md's
+Architecture section for the full pipeline and data flow.

@@ -50,3 +50,12 @@ This file feeds Chapter 4.
   `Shapes.starWithNonOutputJoinVariable()` (SELECT DISTINCT ?n over a star BGP joined on ?p) to
   cover the star + hidden-join-variable combination. Confirmed green via
   `mvn test -Dtest=DifferentialTest`.
+- Step 3 (decide on the superseded `YannakakisQueryEngine`/`YannakakisTransform` scaffold):
+  deleted both files. Repo-wide search found zero inbound references outside the two files
+  themselves — no imports, no test coverage, no `pom.xml` wiring, and `register()` (via
+  `QueryEngineRegistry`) is never called anywhere; `YannakakisTransform.transform(OpBGP)` was
+  confirmed a literal no-op (`return opBGP;`). They also contradict CLAUDE.md's hard rule that
+  integration must happen via `OpExecutor` at execution time, never via algebra
+  `Transform` rewriting — so keeping them wasn't a live option. Updated README.md's project
+  layout, "Integration approach", and "Next milestones" sections, which only described this
+  abandoned plan.
