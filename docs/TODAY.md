@@ -44,3 +44,9 @@ This file feeds Chapter 4.
   against stock ARQ as oracle). Confirmed green via
   `mvn test -Dtest=YannakakisOpExecutorTest,DifferentialTest` (29/29 passed).
   Adding a separate test would have duplicated existing coverage.
+- Step 2 (differential test: path / star / non-output join variable shapes): path and star
+  shapes were already covered (`Shapes.path()`, `Shapes.star()`). A non-output join variable was
+  only covered for a path shape (`Wrappers.distinct()`); added
+  `Shapes.starWithNonOutputJoinVariable()` (SELECT DISTINCT ?n over a star BGP joined on ?p) to
+  cover the star + hidden-join-variable combination. Confirmed green via
+  `mvn test -Dtest=DifferentialTest`.

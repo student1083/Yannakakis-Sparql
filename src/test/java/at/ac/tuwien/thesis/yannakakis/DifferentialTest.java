@@ -153,6 +153,12 @@ class DifferentialTest {
                     SELECT * WHERE { ?p ex:knows ?q . ?p ex:name ?n . ?p ex:knows ?r . }""");
         }
 
+        @Test void starWithNonOutputJoinVariable() {
+            // ?p is the star's central join variable across all three triples, but only ?n is projected.
+            assertSameBagAndFiredNonEmpty(socialModel(), PREFIX + """
+                    SELECT DISTINCT ?n WHERE { ?p ex:knows ?q . ?p ex:name ?n . ?p ex:knows ?r . }""");
+        }
+
         @Test void snowflake() {
             // central ?p with two branches, each extended one hop
             assertSameBagAndFired(socialModel(), PREFIX + """
