@@ -142,9 +142,10 @@ class OutputVariableSafetyTest {
      * Superset of every fixture the corpus queries were written against: the social model
      * (knows-triangle a-b-c, chain c-d, self-loop d-d, livesIn/country, names), the
      * hasType/nick people, an ex:r 4-cycle, and an ex:p/ex:q/ex:r chain with numeric ex:q
-     * objects for the analyzer queries.
+     * objects for the analyzer queries. Package-private so
+     * {@link YannakakisPlusEvaluatorTest} can run the same corpus at the BGP level.
      */
-    private static Model corpusModel() {
+    static Model corpusModel() {
         Model m = ModelFactory.createDefaultModel();
         Property knows = m.createProperty(NS + "knows"), livesIn = m.createProperty(NS + "livesIn");
         Property country = m.createProperty(NS + "country"), name = m.createProperty(NS + "name");

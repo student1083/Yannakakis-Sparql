@@ -64,6 +64,26 @@ public final class Relation {
         return key;
     }
 
+    /**
+     * Projection π_{vars}: keeps the columns in {@code vars} ∩ schema (schema order).
+     * Set semantics — rows that become equal collapse into one; multiplicities are
+     * lost, which is why the executor may not project before the full BGP result is
+     * built until step 10 adds counting-semiring annotations.
+     */
+    public Relation project(Set<Var> vars) {
+        List<Var> kept = new ArrayList<>();
+        for (Var v : schema) if (vars.contains(v)) kept.add(v);
+        if (kept.size() == schema.size()) return this;
+
+        Set<Map<Var, Node>> out = new HashSet<>();
+        for (Map<Var, Node> r : rows) {
+            Map<Var, Node> m = new HashMap<>(kept.size() * 2);
+            for (Var v : kept) m.put(v, r.get(v));
+            out.add(m);
+        }
+        return new Relation(new LinkedHashSet<>(kept), out);
+    }
+
     /** Semijoin: keep my tuples that have a matching partner in {@code other}. */
     public Relation semijoin(Relation other) {
         List<Var> shared = sharedVars(other);
