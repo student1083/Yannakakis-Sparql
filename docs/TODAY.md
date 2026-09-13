@@ -59,3 +59,15 @@ This file feeds Chapter 4.
   `Transform` rewriting — so keeping them wasn't a live option. Updated README.md's project
   layout, "Integration approach", and "Next milestones" sections, which only described this
   abandoned plan.
+- Step 4 (write `docs/implementation-inventory.md`): documented all 12 classes under
+  `at.ac.tuwien.thesis.yannakakis` (6 pipeline classes + 6 standalone `main()` demos, the latter
+  flagged as not part of the tested surface), a step-by-step `OpBGP` → bindings trace with
+  file:line citations verified directly against current source, and 10 deviations from Wang et
+  al. (set semantics, no PK-FK/Dimension Fusion, width-3 hyperedges, no cost-based join tree
+  selection, arbitrary isolated-component anchoring, execution-time-only integration, full
+  fallback for any cyclic BGP, no join-tree caching across bindings, no OPTIONAL support in the
+  evaluator, no RDF-specific match optimizations). Called out that CLAUDE.md's architecture
+  section is stale re: `YannakakisQueryEngine`/`YannakakisTransform` (describes them as
+  abandoned-but-present; they were deleted in step 3) so the new doc reflects current reality
+  instead. `mvn test` not re-run (docs-only change, no code touched); last known-green run was
+  step 3's `mvn test -Dtest=DifferentialTest`.
