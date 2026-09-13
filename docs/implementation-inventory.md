@@ -1,181 +1,143 @@
- # Implementation inventory
+# Implementation inventory
 
-Snapshot of `at.ac.tuwien.thesis.yannakakis` as of the deletion of the abandoned
-`YannakakisQueryEngine`/`YannakakisTransform` scaffold (see `docs/today.md`, step 3).
-Written to support Chapter 4: every class's responsibility, the data flow from `OpBGP`
-to result bindings, and every deviation from Wang et al.'s Yannakakis algorithm, with
-the reason for each.
-
-Note: `CLAUDE.md`'s architecture section still describes `YannakakisQueryEngine` and
-`YannakakisTransform` as present-but-abandoned. They have since been deleted outright
-(zero inbound references, `transform(OpBGP)` was a permanent no-op, and the whole
-approach contradicted the execution-time-only integration rule below) — this document
-reflects the current source tree, not that stale description.
+Snapshot of `at.ac.tuwien.thesis.yannakakis` as of step 10 (counting-semiring multiplicities,
+Algorithm 2, executor on Yannakakis+; see `docs/today.md`). Written to support Chapter 4: every
+class's responsibility, the data flow from `OpBGP` to result bindings, and every deviation from
+Wang et al.'s Yannakakis+ with the reason for each. Earlier snapshots cited line numbers; those
+went stale within a day, so this version cites methods.
 
 ## 1. Classes
 
 | Class | Path | Responsibility |
 |---|---|---|
-| `YannakakisOpExecutor` | `YannakakisOpExecutor.java` | The live ARQ integration point: an `OpExecutor` registered via `QC.setFactory` that intercepts `OpBGP` execution, runs the GYO → `JoinTree` → `Relation` → `YannakakisEvaluator` pipeline for acyclic BGPs against the active graph, and falls back to stock ARQ (`super.execute`) for cyclic BGPs or when there is no active graph. |
-| `QueryHypergraph` | `QueryHypergraph.java` | Builds a hypergraph view of a `BasicPattern` — variables as vertices, triple patterns as hyperedges (`Hyperedge` inner class) — with both edge→vars and var→edges incidence maps; identifies join variables. |
-| `GyoReduction` | `GyoReduction.java` | Runs the GYO ear-removal algorithm to test α-acyclicity of a `QueryHypergraph` and, if acyclic, builds the corresponding `JoinTree`. |
-| `JoinTree` | `JoinTree.java` | Rooted tree of hyperedges (one node per triple pattern) produced by `GyoReduction`; exposes `satisfiesRunningIntersection()` as a connectedness self-check used as a correctness oracle in tests, and a `pretty()` printer. |
-| `Relation` | `Relation.java` | Immutable set-of-tuples (`Var → Node` rows) representing a materialized triple pattern or intermediate result; provides `semijoin`, `join` (hash join on shared variables, cross product if none) and builder/factory methods. |
-| `YannakakisEvaluator` | `YannakakisEvaluator.java` | Given a `JoinTree` and one `Relation` per edge, runs upward semijoin → downward semijoin → upward join passes and returns the joined `Relation` at the root. |
-| `AlgebraContextAnalyzer` | `AlgebraContextAnalyzer.java` | Read-only, single-pass walk of an ARQ `Op` tree computing, per `OpBGP` (keyed by object identity), the output variables `O` the rest of the plan needs from that BGP (demand flows top-down: projection resets it; FILTER/ORDER BY/GROUP BY/aggregate/BIND expressions and all sibling operands of join-like operators extend it). Falls back to all variables, with a counted `FallbackReason`, under `OpExt`/`OpService`/`OpPropFunc`/`OpProcedure`. Stores its `Analysis` in the execution `Context` under `AlgebraContextAnalyzer.SYMBOL`. Never modifies the tree. Run once per query execution by `YannakakisOpExecutor.exec` and consulted in `execute(OpBGP)`. |
+| `YannakakisOpExecutor` | `YannakakisOpExecutor.java` | The single ARQ integration point: an `OpExecutor` registered via `QC.setFactory` that runs the algebra analysis once per execution (`exec` override), intercepts `OpBGP` execution, and for acyclic BGPs runs classify → match → `YannakakisPlusEvaluator` per incoming binding, emitting π_O rows with their multiplicities (collapsed to 1 when the analyzer says the BGP sits under a DISTINCT). Cyclic BGPs and the no-active-graph case fall back to stock ARQ (`super.execute`). Counters `invocations()`, `analyses()`, `narrowedBgps()`, `collapsedBgps()` for tests. |
+| `AlgebraContextAnalyzer` | `AlgebraContextAnalyzer.java` | Read-only, single-pass walk of an ARQ `Op` tree computing, per `OpBGP` (keyed by object identity), (a) the output variables `O` the rest of the plan needs from that BGP — demand flows top-down: projection resets it; FILTER/ORDER BY/GROUP BY/aggregate/BIND expressions and all sibling operands of join-like operators extend it — and (b) `countsCollapsible`: true below an `OpDistinct` until a multiplicity-sensitive operator (`OpGroup`, `OpSlice`, `OpTopN`, `OpExtend`/`OpAssign`/`OpUnfold`, any fallback) intervenes, and true for the right operand of MINUS / semijoin / anti-join. Falls back to all variables and not-collapsible, with a counted `FallbackReason`, under `OpExt`/`OpService`/`OpPropFunc`/`OpProcedure`. Stores its `Analysis` in the execution `Context` under `AlgebraContextAnalyzer.SYMBOL`. Never modifies the tree. |
+| `QueryHypergraph` | `QueryHypergraph.java` | Builds a hypergraph view of a `BasicPattern` — variables as vertices, triple patterns as hyperedges (`Hyperedge` inner class, id = position in the BGP) — with both edge→vars and var→edges incidence maps; identifies join variables. |
+| `GyoReduction` | `GyoReduction.java` | GYO ear removal. `reduce(Map<Integer,Set<Var>>)` is the core over abstract edges (shared with the classifier for H+ and the connex projection); `decompose(QueryHypergraph)` wraps it into a `JoinTree`; `isAcyclic` is the executor's pre-check. `gyoRunCount()` is test-only instrumentation counting `reduce` runs. |
+| `JoinTree` | `JoinTree.java` | Rooted tree of hyperedges (one node per triple pattern). `build(h, rootId, parentOf)` constructs it from a child→parent map (used by GYO and by the classifier's re-rooted / free-connex trees); `satisfiesRunningIntersection()` is the connectedness self-check used as a correctness oracle in tests; `pretty()` prints it. |
+| `QueryClassifier` | `QueryClassifier.java` | Classifies an acyclic BGP against `O` (Wang et al. Def. 3.10 / Bagan–Durand–Grandjean): relation-dominated (one hyperedge ⊇ O; root = that edge), free-connex (H and H+ = H ∪ {O} acyclic; root = root of the free-connex tree, whose connex subtree Tn is exposed), or general acyclic (GYO root, Tn = all nodes). `satisfiesConnexProperty` is the test oracle for Tn. `classify` returns empty for cyclic BGPs. |
+| `Relation` | `Relation.java` | Immutable bag of tuples: distinct `Var → Node` rows each annotated with a positive count — the counting semiring (ℕ, +, ×). `project` sums collapsed rows, `join` (hash join on shared variables, cross product if none) multiplies, `semijoin` keeps the left count, graph matches start at 1, `distinct()` resets every count to 1. `rowCount()` counts distinct rows, `bagSize()` sums the counts. |
+| `YannakakisPlusEvaluator` | `YannakakisPlusEvaluator.java` | Wang et al. Algorithm 1 (`firstRound`: post-order absorb-or-semijoin with early projection onto O ∪ join variables, returning the reduced tree and semijoin/absorption counts; `evaluateRelationDominated` asserts Theorem 3.11) and Algorithm 2 (`secondRound`: merge children into the dangling-free root, dropping non-output join variables no remaining neighbour still uses; `setInvariantChecks` turns the free-connex "never a general merge" claim into an exception). `evaluate(Classification, rels)` combines them and returns π_O with multiplicities plus counters. |
+| `YannakakisEvaluator` | `YannakakisEvaluator.java` | The classical three-pass Yannakakis (upward semijoin → downward semijoin → upward join) returning the full join at the root. Untouched since step 4; no longer on the executor's path. Kept as the differential oracle for the Plus evaluator (π_O of its result is the bag-exact expected answer). |
 | `SmokeTest` | `SmokeTest.java` | Standalone `main()` toolchain check: builds a tiny in-memory model, runs a one-triple SPARQL query via stock Jena, prints the result. Not part of the tested surface. |
-| `AlgebraExplorer` | `AlgebraExplorer.java` | Demo `main()`: compiles a SPARQL query to the ARQ `Op` algebra tree, prints it, and walks each `OpBGP` describing every triple-pattern node's kind (variable/IRI/literal/blank). Not part of the tested surface. |
+| `AlgebraExplorer` | `AlgebraExplorer.java` | Demo `main()`: compiles a SPARQL query to the ARQ `Op` algebra tree, prints it, and walks each `OpBGP` describing every triple-pattern node's kind. Not part of the tested surface. |
 | `HypergraphDemo` | `HypergraphDemo.java` | Demo `main()`: compiles a fixed SPARQL query and prints the `QueryHypergraph` built from its BGP. Not part of the tested surface. |
-| `GyoDemo` | `GyoDemo.java` | Demo `main()`: runs GYO decomposition over path/star/triangle example queries, printing the resulting join tree or reporting cyclicity. Not part of the tested surface. |
-| `YannakakisIntuitionDemo` | `YannakakisIntuitionDemo.java` | Demo `main()`: manually replicates the evaluator's semijoin/join passes step-by-step on hand-built relations, printing intermediate sizes to illustrate the dangling-tuple pruning intuition. Not part of the tested surface. |
+| `GyoDemo` | `GyoDemo.java` | Demo `main()`: runs GYO decomposition over path/star/triangle example queries, printing the join tree or reporting cyclicity. Not part of the tested surface. |
+| `YannakakisIntuitionDemo` | `YannakakisIntuitionDemo.java` | Demo `main()`: replicates the classical evaluator's semijoin/join passes step by step on hand-built relations, printing intermediate sizes to illustrate dangling-tuple pruning. Not part of the tested surface. |
 | `YannakakisArqDemo` | `YannakakisArqDemo.java` | Demo `main()`: runs the same query with stock ARQ and with `YannakakisOpExecutor` registered against the same model, comparing results and printing whether the executor fired. Not part of the tested surface. |
 
 All paths are relative to `src/main/java/at/ac/tuwien/thesis/yannakakis/`.
 
 ## 2. Data flow: `OpBGP` → result bindings
 
-Traced through `YannakakisOpExecutor.java`.
+Traced through `YannakakisOpExecutor`.
 
-1. **Registration.** `register()` (`:66-70`) saves the previously-installed factory and calls
-   `QC.setFactory(ARQ.getContext(), FACTORY)`, where `FACTORY = YannakakisOpExecutor::new`
-   (`:40`). From then on, ARQ's main execution engine constructs a `YannakakisOpExecutor` per
-   query execution and dispatches every `OpBGP` node to it.
+1. **Registration.** `register()` saves the previously installed factory and calls
+   `QC.setFactory(ARQ.getContext(), FACTORY)`, where `FACTORY = YannakakisOpExecutor::new`. From
+   then on ARQ's main engine constructs a `YannakakisOpExecutor` per query execution and
+   dispatches every `OpBGP` node to it.
 
-1b. **Algebra analysis, once per execution.** ARQ enters an executor through the protected
-   recursive step `exec(Op, QueryIterator)` (`QC.execute` → static `OpExecutor.execute` →
-   `exec`), *not* through `executeOp`. `YannakakisOpExecutor.exec` overrides it: if the
-   execution's `Context` holds no `AlgebraContextAnalyzer.Analysis` yet, it runs
-   `AlgebraContextAnalyzer.analyze(op, execCxt)` on the `op` it was given — which, for the
-   first call of an execution, is the root of the optimised plan — and stores the table under
-   `AlgebraContextAnalyzer.SYMBOL`. All later `exec` calls (the recursion within this executor,
-   and the fresh executors ARQ creates per row for index joins / EXISTS) share the same
-   per-execution `Context` and skip the analysis. `analyses()` counts these runs (one per
-   execution, asserted by `YannakakisOpExecutorTest#analysisRunsOncePerQueryExecutionDespiteNestedExecutors`).
+2. **Algebra analysis, once per execution.** ARQ enters an executor through the protected
+   recursive step `exec(Op, QueryIterator)` (`QC.execute` → static `OpExecutor.execute` → `exec`),
+   *not* through `executeOp`. The `exec` override runs `AlgebraContextAnalyzer.analyze(op,
+   execCxt)` if the execution's `Context` holds no `Analysis` yet — for the first call of an
+   execution `op` is the root of the optimised plan — and stores the table under
+   `AlgebraContextAnalyzer.SYMBOL`. Later `exec` calls (the recursion within this executor, and the
+   fresh executors ARQ creates per row for index joins / EXISTS) share the per-execution `Context`
+   and skip it. An analysis that throws is logged and replaced by `emptyAnalysis()` so every lookup
+   falls back and nothing is retried (`YannakakisOpExecutorTest#failingAnalysisNeverFailsTheQuery`).
 
-2. **Interception + acyclicity check.** `execute(OpBGP opBGP, QueryIterator input)` (`:49-62`)
-   pulls the pattern via `opBGP.getPattern()` (`:51`) and the active graph via
-   `execCxt.getActiveGraph()` (`:52`). It tests acyclicity at `:54-55`:
-   `activeGraph != null && GyoReduction.isAcyclic(QueryHypergraph.fromBasicPattern(pattern))`.
-   If false (cyclic BGP, or no active graph), it delegates unchanged: `return super.execute(opBGP,
-   input)` (`:58`) — stock ARQ's default nested-loop join handles it from here on. Otherwise the
-   invocation counter is bumped (`:60`, read by tests via `invocations()`/`resetCounter()`,
-   `:77-78`), the BGP's output variables `O` are fetched via
-   `AlgebraContextAnalyzer.outputVarsOrAll(execCxt, opBGP)` (all variables if the table has no
-   entry for this exact `OpBGP` object — ARQ manufactures fresh ones for quad patterns and for
-   the `Substitute`d right side of `QueryIterOptionalIndex`; a missing `O` is never an error,
-   and an analysis that throws is caught in `exec`, logged, and replaced by an empty table),
-   `narrowedBgps()` is bumped when `O` is a strict subset, `O` is logged at debug, and a
-   `Stage` carrying `O` is returned.
+3. **Interception + acyclicity check.** `execute(OpBGP, QueryIterator)` tests
+   `activeGraph != null && GyoReduction.isAcyclic(QueryHypergraph.fromBasicPattern(pattern))`. If
+   false it returns `super.execute(opBGP, input)` — stock ARQ's nested-loop join from here on.
+   Otherwise it bumps `invocations()`, looks up `O` via `AlgebraContextAnalyzer.outputVarsOrAll`
+   (all variables if this exact `OpBGP` object was never analysed — ARQ manufactures fresh ones
+   for quad patterns and for the `Substitute`d right side of `QueryIterOptionalIndex`) and the
+   collapsible flag via `countsCollapsible` (false when unanalysed), and returns a `Stage`
+   carrying both.
 
-3. **Per-input-binding evaluation.** `Stage` (`:82-119`) extends `QueryIterRepeatApply`, so
-   `nextStage(Binding binding)` (`:90-118`) runs once per binding arriving from the outer query
-   plan (a BGP can be nested under joins/OPTIONAL/subqueries that already bound some variables):
-   - **Substitute** (`:93-94`): each `Triple` in the original pattern has its bound variables
-     replaced with concrete `Node`s via `substitute`/`sub` (`:123-133`), producing `bound`, a
-     `BasicPattern` with fewer free variables.
-   - **Rebuild hypergraph + join tree, restrict `O`** (`:97-98`): `GyoReduction.decompose(QueryHypergraph
-     .fromBasicPattern(bound))` runs again on the *substituted* pattern — not reusing the
-     acyclicity check from step 2 — returning `Optional<JoinTree>`. Alongside it, `O` is
-     restricted to the variables still free in `bound` (a variable the incoming binding already
-     bound is a constant now and is carried by the parent binding, not produced here) and logged
-     at debug. Both are cached per binding shape in a `ShapePlan`. The restricted `O` is
-     **not yet used** to change anything below; later steps consume it.
-   - **Materialize against the live graph** (`:100-104`, via `matchTriple`, `:135-157`): for each
-     triple in `bound`, `g.find(match(s), match(p), match(o))` queries the graph with
-     `Node.ANY` wildcards for variable positions (`match`, `:159`); matching triples become rows
-     of a `Relation` keyed by the triple's position `id` in `rels`. `bindPos` (`:164-170`) checks
-     that repeated variables within one triple agree on the same value.
-   - **Evaluate** (`:107-108`): `jt.map(tree -> YannakakisEvaluator.evaluate(tree,
-     rels)).orElseGet(() -> naiveFold(rels))` — Yannakakis pipeline if the substituted pattern is
-     acyclic, else `naiveFold` (`:172-176`, plain left-to-right natural join) as a safety net.
-   - **Merge back into bindings** (`:110-117`): each row of the resulting `Relation` is layered
-     onto the *original* incoming `binding` via `BindingFactory.builder(binding)` (`:113`),
-     producing one `Binding` per result row — all variables, `O` is not applied here yet —
-     wrapped as a `QueryIterator` via
-     `QueryIterPlainWrapper.create(out.iterator(), getExecContext())` (`:117`).
-     `QueryIterRepeatApply` concatenates these across all incoming bindings and hands the result
-     back up the ARQ iterator chain, where projection, `DISTINCT`, `ORDER BY`, etc. are all
-     applied by stock ARQ around the BGP.
+4. **Per-input-binding evaluation.** `Stage extends QueryIterRepeatApply`, so
+   `nextStage(Binding)` runs once per binding arriving from the outer plan:
+   - **Substitute**: every bound variable of the pattern is replaced by its node
+     (`substitute`/`sub`), producing `bound`.
+   - **Classify (cached per binding shape)**: `O` is restricted to the variables still free in
+     `bound` (a variable the incoming binding already bound is a constant now and is carried by
+     the parent binding) and `QueryClassifier.classify(hypergraph(bound), restricted)` yields the
+     kind, the rooted `JoinTree` and the effective `O`. The result depends only on the shape
+     (which positions are variables and which), so it is memoised in `planCache` keyed by
+     `shapeKey(bound)` for the lifetime of the `Stage`
+     (`YannakakisOpExecutorTest#joinTreeCacheAvoidsRedecomposePerBindingShape`).
+   - **Materialize**: `matchTriple` runs one `Graph.find` per triple with `Node.ANY` in variable
+     positions; `bindPos` makes repeated variables within one triple agree. Each match becomes a
+     row with count 1 in a `Relation` keyed by the triple's position.
+   - **Evaluate**: `YannakakisPlusEvaluator.evaluate(classification, rels).relation()` — π_O of
+     the BGP with multiplicities (see section 2a). The classification is never empty here: binding
+     variables to constants only deletes hypergraph vertices, so an acyclic BGP stays acyclic
+     (`GyoReductionTest#acyclicityPreservedUnderBinding`).
+   - **DISTINCT**: iff the BGP is collapsible, `result = result.distinct()`. This is the only place
+     multiplicities are dropped.
+   - **Merge back into bindings**: each distinct row is layered onto the incoming `binding` via
+     `BindingFactory.builder(binding)` and added `count` times to the output list, wrapped by
+     `QueryIterPlainWrapper.create(out.iterator(), getExecContext())`. `QueryIterRepeatApply`
+     concatenates these across incoming bindings; projection, ORDER BY, GROUP BY, the actual
+     `DISTINCT` operator etc. are still applied by stock ARQ above the BGP — they simply receive
+     the π_O bag instead of the full BGP bag.
 
-4. **Inside `YannakakisEvaluator.evaluate(JoinTree, Map<Integer,Relation>)`** (`:18-58`):
-   - Empty BGP short-circuit: `tree.root() == null` → `Relation.unit()` (`:19`).
-   - Builds post-order and pre-order node lists (`postOrder`/`preOrder`, `:60-67`).
-   - **Phase 1 — upward semijoin** (`:34-41`): for each node in post-order (children before
-     parents), `parent := parent ⋉ child` via `Relation.semijoin` (`Relation.java:68-82`).
-   - **Phase 2 — downward semijoin** (`:42-48`): for each node in pre-order (parents before
-     children), `child := child ⋉ parent` — together with phase 1, the full semijoin reducer.
-   - **Phase 3 — upward join** (`:49-56`): for each node in post-order again, `parent := parent ⋈
-     child` via `Relation.join` (`Relation.java:85-116`, hash join on shared variables or cross
-     product if none shared), accumulating the answer at the root.
-   - Returns `rel.get(tree.root().edge().id())` (`:57`) — handed back to `Stage.nextStage`.
+### 2a. Inside `YannakakisPlusEvaluator.evaluate`
 
-5. **Supporting structures:**
-   - `QueryHypergraph.fromBasicPattern` (`QueryHypergraph.java:61-79`) builds one `Hyperedge` per
-     triple (vars collected via `collectVar`, `:81-85`) and the `vertexToEdges` incidence map,
-     using `LinkedHashMap`/`LinkedHashSet` for deterministic order.
-   - `GyoReduction.decompose` (`GyoReduction.java:31-66`) repeatedly removes "ears" — hyperedges
-     whose shared variables are all covered by one other edge (the witness) — via `findEar`
-     (`:75-100`), recording child→parent links. An edge with no shared variables (an isolated
-     component) attaches to an arbitrary remaining edge as a cross-product join (`:88-91`). If no
-     ear exists while more than one edge remains, `decompose` returns `Optional.empty()` (cyclic,
-     `:48`). On success, `JoinTree.Node`s are built and wired via `setParent`/`children()`
-     (`:55-64`).
-   - `JoinTree.satisfiesRunningIntersection()` (`JoinTree.java:54-72`) is a correctness self-check
-     (used in tests, not on the hot path): for every variable, the nodes containing it must form
-     exactly one connected entry point into the tree.
+- **Relation-dominated** (O ⊆ A_root): `evaluateRelationDominated` runs the first round and asserts
+  that exactly one node remains and no semijoin ran (Theorem 3.11); the answer is π_O of the root.
+- **Otherwise**: `firstRound` then `secondRound(reduced, expectReducible = free-connex)`.
+- **First round** (Algorithm 1), nodes in post-order, root last: a node whose remaining children
+  were all absorbed counts as a leaf; a leaf with A_i ∩ O ⊆ A_p is absorbed —
+  `Rp := Rp ⋈ π_{A_p}(R_i)`, which with counts sums the leaf's non-output multiplicities into
+  the parent — otherwise `R_i := π_{O ∪ A_i^-}(R_i)`, `Rp := Rp ⋉ R_i`. A_i^- is computed over
+  the whole query. The root is projected last. Returns the reduced tree (remaining nodes keep
+  their original parent links; they form a connected subtree containing the root) and counters.
+- **Second round** (Algorithm 2): the dangling-free node is always the blob the root has grown
+  into. A child R_j is *reducible* iff no other neighbour of R_i or of R_j still uses a variable
+  of D = (A_i ∩ A_j) \ O; then `R_i := π_{(A_i ∪ A_j) \ D}(R_i ⋈ R_j)` and R_j's children become
+  R_i's. Without a reducible child, the general merge joins a child and keeps the variables of D a
+  neighbour still needs (`generalMerges`). Finally π_O.
+- The semiring makes this bag-exact: `RelationTest#projectionCommutesWithJoinOnTheBag` is the
+  property, `YannakakisPlusEvaluatorTest` diffs against π_O of `YannakakisEvaluator`.
 
-## 3. Deviations from Wang et al. / the general Yannakakis algorithm
+## 3. Deviations from Wang et al.
 
-- **Set semantics only, no multiset/bag join.** `Relation` is explicitly a *set* of tuples
-  (`Relation.java:19-23`: "a graph is a set of triples, so a single BGP yields set semantics"),
-  backed by `HashSet<Map<Var,Node>>` throughout `semijoin`/`join`. `CLAUDE.md` hard rule: "Scope
-  is SELECT DISTINCT only (set semantics). No multiset/bag support." Wang et al.'s Yannakakis+ is
-  stated over bags with duplicate counts; this implementation de-duplicates at every `Relation`
-  operation and cannot preserve multiplicities.
-- **PK-FK and Dimension Fusion rules omitted.** `CLAUDE.md` hard rule: "PK-FK and Dimension
-  Fusion rules from Wang et al. do not transfer to RDF. Never implement them." No detection or
-  shortcut for such relationships exists in `YannakakisEvaluator`, `GyoReduction`, or `Relation`
-  — every join tree edge goes through the full three-phase pass unconditionally.
-- **Hyperedge rank capped at 3.** `CLAUDE.md` hard rule: "RDF triples limit hyperedge rank
-  (arity) to 3." Structurally enforced in `QueryHypergraph.fromBasicPattern` (`:66-77`), which only ever
-  inspects `t.getSubject()`, `t.getPredicate()`, `t.getObject()` — a hyperedge (one triple
-  pattern) carries at most 3 distinct variables, unlike the paper's arbitrary-arity relational
-  hyperedges.
-- **No cost-based join tree selection.** `GyoReduction.findEar` (`:75-100`) picks the first ear
-  found by iterating `remaining` in list order, and the first valid witness for it — there is no
-  choice among candidate ears/witnesses based on cardinality estimates or resulting tree shape.
-  `docs/today.md` explicitly lists "Cost-based join tree selection" as out of scope.
-- **Isolated components attach arbitrarily, not cost-aware.** When a hyperedge shares no
-  variables with the rest of the hypergraph, `findEar` (`:88-91`) attaches it to whichever
-  remaining edge comes first in iteration order as a cross-product join, without regard to which
-  anchor minimizes the resulting intermediate size.
-- **Execution-time interception only, never algebra rewriting — by explicit design rule.**
-  `CLAUDE.md` hard rule: "Integration happens at EXECUTION TIME via `OpExecutor` interception.
-  Never via algebra rewriting / `Transform` on the algebra tree. ARQ has no native semijoin
-  operator, so semijoin passes must run at execution time." The earlier `Transform`-based
-  approach (`YannakakisQueryEngine`/`YannakakisTransform`) was built, found to contradict this
-  rule (and never actually implemented — `transform(OpBGP)` was a permanent no-op), and deleted.
-- **Cyclic BGPs fall back entirely to stock ARQ — no generalized hypertree decomposition.**
-  `YannakakisOpExecutor.execute` (`:54-58`) only implements the pure α-acyclic case (GYO ear
-  removal); when `GyoReduction.isAcyclic` returns false it hands the *whole* BGP to stock ARQ's
-  nested-loop join, with no attempt at bounded generalized-hypertree-width decomposition of a
-  partially-cyclic pattern. Confirmed by `DifferentialTest.CyclicDelegation` (`triangle`,
-  `fourCycle`, `cyclicCoreWithAcyclicTail`), which assert `invocations() == 0` even when only part
-  of the BGP is cyclic.
-- **Join tree is rebuilt from scratch on every incoming binding, with no caching.**
-  `Stage.nextStage` (`:90-118`) reruns `GyoReduction.decompose` for every binding fed in from the
-  outer plan (`:97-98`), even though the join tree's *structure* is invariant across bindings for
-  a fixed BGP shape — only the materialized `Relation`s differ. No memoization keyed by BGP shape.
-- **No OPTIONAL support inside the evaluator itself.** `docs/today.md` lists "OPTIONAL handling"
-  as out of scope for this milestone. `DifferentialTest.Wrappers.optional()` only verifies the BGP
-  *inside* an `OPTIONAL` block still fires the Yannakakis path — ARQ's own left-join iterator,
-  not `YannakakisEvaluator`, implements the left-outer-join semantics around it.
-- **No RDF-specific match optimizations.** `matchTriple` (`:135-157`) always does one generic
-  `Graph.find` per triple pattern with `Node.ANY` wildcards; there is no use of predicate
-  statistics, index selection, or property-path handling beyond what Jena's default `Graph.find`
-  already provides.
-- **`naiveFold` is an unordered, non-cost-based safety net.** `naiveFold` (`:172-176`) is only
-  reached if the post-substitution BGP unexpectedly turns out cyclic despite the outer acyclicity
-  check having passed pre-substitution; it does a plain left-to-right natural join in relation
-  iteration order, with no join-order optimization — a correctness fallback, not a performance
-  path.
+- **Hyperedge rank capped at 3.** `CLAUDE.md` hard rule. Structurally enforced by
+  `QueryHypergraph.fromBasicPattern`, which only inspects subject, predicate and object — a
+  hyperedge carries at most 3 variables, unlike the paper's arbitrary-arity relations. One
+  consequence: a query is relation-dominated only if |O| ≤ 3 (`QueryClassifierTest`).
+- **PK-FK-based rules omitted.** `CLAUDE.md` hard rule: cycle elimination, aggregation
+  elimination and semijoin elimination (Wang et al. §5.1) rely on key constraints RDF does not
+  have. Nothing in the pipeline detects or exploits them. Dimension fusion (cardinality-based)
+  is in scope but not implemented yet (step 11).
+- **Two-sided reducibility in Algorithm 2.** The one-sided condition ("for every other neighbour
+  R_k of R_i, A_k ∩ A_i ⊆ O") ignores R_j's neighbours; on the star {x,a},{x,b},{x,c} with
+  O = {a,b,c} it lets the merge of two arms drop x while the third arm still joins on it. The
+  implementation checks the neighbours of both merged nodes. On free-connex trees both
+  conditions coincide (adjacent Tn nodes share only output variables, D = ∅).
+- **General merge instead of a semijoin-only else branch.** Reducibility is a property of the
+  variable sets, not of the data, so `R_j := R_j ⋉ R_i` never creates a reducible pair and a
+  semijoin-only else branch cannot terminate on the hidden-centre star. The implemented else
+  branch joins a child keeping the still-needed variables: always correct, never output-bounded
+  — exactly the non-free-connex case, where the paper's guarantee does not apply either.
+- **O is an over-approximation.** Sibling demand uses `OpVars.mentionedVars`, which ignores
+  scoping; unanalysed `OpBGP` objects (quad patterns, substituted OPTIONAL bodies) get all
+  variables and are never collapsible. Safe, not tight.
+- **`OpReduced` is not a DISTINCT.** REDUCED permits dropping duplicates, but stock ARQ keeps
+  some, and the differential tests compare bags against stock ARQ.
+- **No cost-based join tree selection.** `GyoReduction.findEar` picks the first ear in list order
+  and its first valid witness; the classifier only re-roots for output-sensitivity. Isolated
+  components attach to whichever remaining edge comes first, as a cross product.
+- **Execution-time interception only, never algebra rewriting.** `CLAUDE.md` hard rule: ARQ has
+  no semijoin operator. The `Transform`-based scaffold was deleted (step 3); the analyzer only
+  reads the tree.
+- **Cyclic BGPs fall back entirely to stock ARQ.** No generalized hypertree decomposition;
+  `DifferentialTest.CyclicDelegation` asserts `invocations() == 0` even when only part of the BGP
+  is cyclic.
+- **No OPTIONAL support inside the evaluator.** ARQ's own left-join iterator implements
+  OPTIONAL around the BGP; the BGP inside still takes the Yannakakis+ path (the substituted body
+  is an unanalysed `OpBGP`, hence O = all variables).
+- **No RDF-specific match optimizations.** One generic `Graph.find` per triple pattern; no
+  predicate statistics or index selection beyond what Jena's `Graph.find` provides.

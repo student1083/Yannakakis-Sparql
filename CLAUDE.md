@@ -32,58 +32,73 @@ part of the tested surface.
 
 ## Architecture
 
-### The pipeline (GYO decomposition → semijoin reduction → join)
+### The pipeline (GYO decomposition → classification w.r.t. O → Yannakakis+)
 
 1. **`QueryHypergraph`** — builds a hypergraph from a Jena `BasicPattern`: variables are vertices,
    triple patterns are hyperedges.
 2. **`GyoReduction`** — runs the GYO ear-removal algorithm over the hypergraph to test
-   α-acyclicity; if acyclic, produces a **`JoinTree`**.
+   α-acyclicity; if acyclic, produces a **`JoinTree`**. The ear-removal core (`reduce`, over
+   abstract `id → vars` maps) is shared with the classifier.
 3. **`JoinTree`** — rooted tree of hyperedges (one node per triple pattern), with a
    `satisfiesRunningIntersection()` self-check used as the correctness oracle in tests.
-4. **`Relation`** — immutable tuple-set (`Var → Node` bindings) with `semijoin`/`join`
-   operations; the runtime data representation matched triple patterns are converted into.
-5. **`YannakakisEvaluator`** — given a `JoinTree` and one `Relation` per edge, runs: upward
-   semijoin pass → downward semijoin pass (together = the full reducer) → upward join pass,
-   returning the joined `Relation` at the tree root.
+4. **`AlgebraContextAnalyzer`** — read-only walk of the ARQ `Op` tree, run once per query
+   execution; per `OpBGP` (by object identity) it records the output variables `O` the rest of
+   the plan needs and whether the BGP's row multiplicities are collapsible (a `DISTINCT` above
+   with nothing multiplicity-sensitive in between). Never rewrites the tree.
+5. **`QueryClassifier`** — classifies an acyclic BGP against `O` as relation-dominated ⊂
+   free-connex ⊂ acyclic and roots the join tree accordingly (dominating relation / free-connex
+   tree with connex subtree Tn / GYO root).
+6. **`Relation`** — immutable bag of tuples (`Var → Node` rows, each with a positive count; the
+   counting semiring: `project` sums, `join` multiplies, `semijoin` keeps the left count,
+   `distinct()` resets to 1) with `project`/`semijoin`/`join`.
+7. **`YannakakisPlusEvaluator`** — Wang et al. Algorithms 1 and 2: first round (post-order
+   absorb-or-semijoin with early projection onto `O ∪ join vars`, Theorem 3.11 short-circuit for
+   relation-dominated queries) and second round (merge children into the dangling-free root,
+   dropping non-output join variables no remaining neighbour needs; free-connex queries never
+   reach the general-merge branch, asserted under `setInvariantChecks(true)`). Returns π_O with
+   multiplicities.
+8. **`YannakakisEvaluator`** — the classical three-pass version (upward semijoin → downward
+   semijoin → upward join), untouched and kept as the differential oracle for the Plus
+   evaluator. Not on the executor's path any more.
 
-### ARQ integration — two paths exist, only one is live
+### ARQ integration
 
-- **`YannakakisOpExecutor` is the actual, working, tested integration point.** It's an
-  `OpExecutor` subclass registered globally via `QC.setFactory(ARQ.getContext(), FACTORY)`
-  (`register()`/`unregister()`). It intercepts each `OpBGP`, checks acyclicity, and — if
-  acyclic — substitutes the incoming binding into the pattern, matches each triple against the
-  active `Graph`, runs the GYO → `JoinTree` → `YannakakisEvaluator` pipeline above, and merges
-  result rows back into a `QueryIterator`. If the BGP is cyclic (or there's no active graph), it
-  delegates to stock ARQ (`super.execute(...)`) unchanged. This is the path every real test
-  (`YannakakisOpExecutorTest`, `DifferentialTest`) exercises.
-- **`YannakakisQueryEngine` + `YannakakisTransform` are an earlier, abandoned integration
-  attempt** — a `QueryEngineMain` subclass meant to rewrite the whole `Op` algebra tree via
-  `Transformer.transform(new YannakakisTransform(), op)`, registered through
-  `QueryEngineRegistry`. `YannakakisTransform.transform(OpBGP)` is still a literal no-op
-  (`return opBGP;`). **Ignore the "Integration approach" and "Next milestones" sections of
-  README.md** — they describe this original plan, which was superseded by the `OpExecutor`
-  approach once the real GYO/join-tree/evaluator logic (above) was built; the README was not
-  updated to match. Nothing in the codebase calls `YannakakisQueryEngine.register()`.
-
-When touching the join/evaluation logic, `YannakakisOpExecutor` is the class that wires it into
-ARQ — not `YannakakisQueryEngine`.
+**`YannakakisOpExecutor` is the single integration point.** It's an `OpExecutor` subclass
+registered globally via `QC.setFactory(ARQ.getContext(), FACTORY)` (`register()`/`unregister()`).
+Its `exec` override runs the analyzer once per execution; `execute(OpBGP)` checks acyclicity and —
+if acyclic — looks up `O` and the collapsible flag, then per incoming binding (`Stage`):
+substitutes the binding, classifies the substituted pattern against `O` restricted to the free
+variables (cached per binding shape), matches each triple against the active `Graph`, runs
+`YannakakisPlusEvaluator.evaluate`, applies `distinct()` iff collapsible, and emits each π_O row
+`count` times layered onto the incoming binding. If the BGP is cyclic (or there's no active
+graph), it delegates to stock ARQ (`super.execute(...)`) unchanged. The earlier
+`YannakakisQueryEngine`/`YannakakisTransform` algebra-rewriting scaffold was deleted (step 3).
 
 ### Testing strategy
 
 There are no external RDF/query fixture files — every model and query is built inline in Java
 (Jena `Model`/`BasicPattern` API, text-block SPARQL strings).
 
-- `QueryHypergraphTest`, `GyoReductionTest`, `YannakakisEvaluatorTest` are unit-level, checking
-  each pipeline stage directly (the evaluator's oracle is a locally-defined naive fold-join).
-- **`DifferentialTest` is the primary correctness harness.** For each query it runs stock ARQ
-  and `YannakakisOpExecutor`-registered ARQ against the *same* in-memory model and asserts the
-  (canonicalized, order-independent unless `ORDER BY` is used) result bags match. It also asserts
-  via `YannakakisOpExecutor.invocations()` whether the Yannakakis path actually fired (acyclic
-  cases) or fully delegated (cyclic cases, including a `UNION` of an acyclic + cyclic branch).
-  It includes a **randomized/property-based suite** (fixed seed `20260706L`, 30 rounds) that
-  generates random acyclic BGPs and matching random graphs and diffs both engines — this is the
-  test to extend when changing core join/semijoin behavior, since it's the main defense against
-  regressions the fixed example queries wouldn't catch.
+- `QueryHypergraphTest`, `GyoReductionTest`, `RelationTest`, `YannakakisEvaluatorTest`,
+  `AlgebraContextAnalyzerTest`, `QueryClassifierTest` are unit-level, checking each pipeline
+  stage directly (the classical evaluator's oracle is a locally-defined naive fold-join).
+- `YannakakisPlusEvaluatorTest` diffs the Plus evaluator against π_O of the classical
+  evaluator (bag-exact, multiplicities included) on fixed shapes, on every BGP of the
+  `OutputVariableSafetyTest` corpus (O from the analyzer, relations from the corpus graph), and
+  on 200 random acyclic BGPs; it asserts Theorem 3.11 (one node, zero semijoins) on every
+  relation-dominated case and zero general merges on every free-connex case.
+- **`DifferentialTest` and `OutputVariableSafetyTest` are the end-to-end correctness harness.**
+  For each query they run stock ARQ and `YannakakisOpExecutor`-registered ARQ against the *same*
+  in-memory model and assert the canonicalized result bags match — sorted row lists that keep
+  duplicates, so multiplicities must agree (order-sensitive when `ORDER BY` is used, row count
+  only for a bare `LIMIT`). `OutputVariableSafetyTest` runs its 62-query corpus and a
+  `SELECT DISTINCT` variant of every non-DISTINCT query; `DifferentialTest` also asserts via
+  `YannakakisOpExecutor.invocations()` whether the Yannakakis path actually fired (acyclic
+  cases) or fully delegated (cyclic cases, including a `UNION` of an acyclic + cyclic branch),
+  and includes a **randomized/property-based suite** (fixed seed `20260706L`, 30 rounds, plus a
+  projected variant) that generates random acyclic BGPs and matching random graphs and diffs
+  both engines — this is the test to extend when changing core join/semijoin behavior, since
+  it's the main defense against regressions the fixed example queries wouldn't catch.
 
 ## Hard rules
 
@@ -91,13 +106,16 @@ There are no external RDF/query fixture files — every model and query is built
   Never via algebra rewriting / `Transform` on the algebra tree.
   ARQ has no native semijoin operator, so semijoin passes must run at
   execution time. This distinction appears throughout the thesis.
-- A BGP's answer under SPARQL semantics is already a set of mappings, so
-  the evaluator's set semantics (`Relation` as `HashSet`) is exact for
-  every SPARQL query, not only `SELECT DISTINCT` — this is not a
-  restriction we impose, only a fact about full-BGP evaluation. The
-  restriction becomes real once we project early (duplicates then need
-  multiplicities to reconstruct bag semantics correctly). No multiset/bag
-  support until step 10 lifts this via counting-semiring annotations.
+- Bag semantics via the counting semiring (step 10). A BGP's answer is a
+  set of mappings, but the moment we project early (Yannakakis+ does, onto
+  `O ∪ join vars`) duplicates need multiplicities to reconstruct SPARQL bag
+  semantics. `Relation` therefore annotates every tuple with a count:
+  `project` sums, `join` multiplies, `semijoin` keeps the left count.
+  Never de-duplicate inside the algorithms. DISTINCT enters in exactly one
+  place — `Relation.distinct()` at the end of `Stage.nextStage`, gated by
+  the analyzer's per-BGP `countsCollapsible` flag — the algorithms never
+  branch on it. `OpReduced` is not a DISTINCT (stock ARQ keeps some
+  duplicates under REDUCED and the differential tests would see it).
 - Cycle elimination, aggregation elimination and semi-join elimination in
   Wang et al. section 5.1 all rely on primary-key or foreign-key
   constraints. RDF has no schema-level keys, so these do not transfer. Do
@@ -125,6 +143,11 @@ There are no external RDF/query fixture files — every model and query is built
   `BindingFactory.empty()` is the empty root binding.
 - `ExprVars.varsMentioned` works with `opFilter.getExprs()`.
 - `opProject.getVars()` returns `List<Var>`.
+- `Query.setDistinct(boolean)` / `isDistinct()` exist; `Query.toString()`
+  re-serializes to SPARQL text.
+- `OpWalker.walk(Op, OpVisitor)` with an `OpVisitorBase` subclass visits
+  every `OpBGP`; `Algebra.compile(Query)` gives the unoptimised `Op`.
+- `Var.getVarName()` returns the bare name.
 
 If an API is not in this list, read the Jena source before using it.
 Do not invent method signatures.
