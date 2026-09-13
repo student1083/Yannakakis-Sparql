@@ -38,17 +38,39 @@ public final class GyoReduction {
     /** @return the join tree if alpha-acyclic, empty if cyclic. */
     public static Optional<JoinTree> decompose(QueryHypergraph h) {
         DECOMPOSE_CALLS.incrementAndGet();
+        if (h.edges().isEmpty()) {                          // empty BGP
+            return Optional.of(JoinTree.empty());
+        }
+        return reduce(edgeVarsOf(h)).map(d -> JoinTree.build(h, d.rootId(), d.parentOf()));
+    }
+
+    /**
+     * Outcome of ear removal over abstract edges: the last edge standing and, for
+     * every other edge, the witness it was removed into (child id → parent id).
+     */
+    record Decomposition(int rootId, Map<Integer, Integer> parentOf) {}
+
+    /** The hypergraph as abstract edges: edge id → its variables (copied, so callers may add edges). */
+    static Map<Integer, Set<Var>> edgeVarsOf(QueryHypergraph h) {
         Map<Integer, Set<Var>> edgeVars = new LinkedHashMap<>();
-        Map<Integer, QueryHypergraph.Hyperedge> edgeById = new LinkedHashMap<>();
         for (QueryHypergraph.Hyperedge e : h.edges()) {
             edgeVars.put(e.id(), new LinkedHashSet<>(e.vars()));
-            edgeById.put(e.id(), e);
         }
+        return edgeVars;
+    }
 
-        if (edgeVars.isEmpty()) {                       // empty BGP
-            return Optional.of(new JoinTree(null, new LinkedHashMap<>()));
-        }
-
+    /**
+     * Ear removal over abstract edges (id → variable set). Package-private so that
+     * {@link QueryClassifier} can run the very same GYO on the augmented hypergraph
+     * H+ = H ∪ {O} and on the connex projection without wrapping synthetic edges in
+     * {@link QueryHypergraph.Hyperedge}s. The input map is not modified.
+     *
+     * @param edges at least one edge
+     * @return the decomposition if alpha-acyclic, empty if cyclic
+     */
+    static Optional<Decomposition> reduce(Map<Integer, Set<Var>> edges) {
+        if (edges.isEmpty()) throw new IllegalArgumentException("reduce needs at least one edge");
+        Map<Integer, Set<Var>> edgeVars = new LinkedHashMap<>(edges);
         Map<Integer, Integer> parentOf = new HashMap<>();   // child id -> parent id
         List<Integer> remaining = new ArrayList<>(edgeVars.keySet());
 
@@ -61,17 +83,7 @@ public final class GyoReduction {
         }
 
         int rootId = remaining.get(0);                      // last edge standing = root
-        Map<Integer, JoinTree.Node> nodes = new LinkedHashMap<>();
-        for (Integer id : edgeById.keySet()) {
-            nodes.put(id, new JoinTree.Node(edgeById.get(id)));
-        }
-        for (Map.Entry<Integer, Integer> pc : parentOf.entrySet()) {
-            JoinTree.Node child  = nodes.get(pc.getKey());
-            JoinTree.Node parent = nodes.get(pc.getValue());
-            child.setParent(parent);
-            parent.children().add(child);
-        }
-        return Optional.of(new JoinTree(nodes.get(rootId), nodes));
+        return Optional.of(new Decomposition(rootId, parentOf));
     }
 
     /** Convenience: acyclicity test only. */

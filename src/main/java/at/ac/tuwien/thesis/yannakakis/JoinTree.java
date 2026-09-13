@@ -5,6 +5,7 @@ import org.apache.jena.sparql.core.Var;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +34,7 @@ public final class JoinTree {
         public List<Node> children()            { return children; }
         public Set<Var> vars()                  { return edge.vars(); }
 
-        void setParent(Node p) { this.parent = p; }   // package-private, set by GyoReduction
+        void setParent(Node p) { this.parent = p; }   // package-private, set by JoinTree.build
 
         @Override public String toString() { return "node(e" + edge.id() + ")"; }
     }
@@ -46,9 +47,36 @@ public final class JoinTree {
         this.byEdgeId = byEdgeId;
     }
 
+    /** Tree of an empty BGP: no root, no nodes. */
+    static JoinTree empty() {
+        return new JoinTree(null, new LinkedHashMap<>());
+    }
+
+    /**
+     * Builds the tree over all hyperedges of {@code h} from a child-id → parent-id
+     * map; {@code rootId} is the one edge without a parent. Shared by
+     * {@link GyoReduction} (arbitrary GYO root) and {@link QueryClassifier}
+     * (re-rooted / free-connex trees).
+     */
+    static JoinTree build(QueryHypergraph h, int rootId, Map<Integer, Integer> parentOf) {
+        Map<Integer, Node> nodes = new LinkedHashMap<>();
+        for (QueryHypergraph.Hyperedge e : h.edges()) {
+            nodes.put(e.id(), new Node(e));
+        }
+        for (Map.Entry<Integer, Integer> pc : parentOf.entrySet()) {
+            Node child  = nodes.get(pc.getKey());
+            Node parent = nodes.get(pc.getValue());
+            child.setParent(parent);
+            parent.children().add(child);
+        }
+        return new JoinTree(nodes.get(rootId), nodes);
+    }
+
     public Node root()              { return root; }
     public Collection<Node> nodes() { return byEdgeId.values(); }
     public int size()               { return byEdgeId.size(); }
+    /** The node of the hyperedge with this id (the triple's position in the BGP), or null. */
+    public Node node(int edgeId)    { return byEdgeId.get(edgeId); }
 
     /** Verifies the connectedness condition for every variable. */
     public boolean satisfiesRunningIntersection() {

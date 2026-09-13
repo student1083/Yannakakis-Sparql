@@ -121,3 +121,21 @@ This file feeds Chapter 4.
   ordered, the bare-LIMIT query by row count. Omitted the `SERVICE` query (remote call); the two
   analyzer ORDER BY queries got a tie-breaking `?x` so both engines' order is well-defined.
   `mvn test`: 136/136 green.
+- Step 7 (`QueryClassifier`: relation-dominated / free-connex / acyclic w.r.t. O): new class, GYO
+  left untouched except for exposing its ear-removal core over abstract `id → vars` maps
+  (`GyoReduction.reduce`, package-private) so H+ = H ∪ {[O]} and the connex projection can run
+  through the very same code without synthetic `Hyperedge`s; the tree-building tail of
+  `decompose` moved to `JoinTree.build` for the same reason. Free-connex tree construction: root
+  the H+ tree at [O], delete it, its children C1..Ck are Tn; a second GYO on the projections
+  Ei = vars(Ci) ∩ O gives Tn's shape (acyclic because it is the vertex restriction of the acyclic
+  H to O minus subset edges — every O-variable in a subtree under [O] is already in that
+  subtree's top node by running intersection), each Ci keeps its subtree. Naively hanging all
+  Ci under one of them is wrong (found by hand: C1={a}, C2={b,c}, C3={b,c'} with O={a,b,c}
+  breaks running intersection for b), hence the second GYO. Precedence relation-dominated >
+  free-connex > acyclic; the classes are nested (O ⊆ e makes [O] an ear under e), and the
+  randomized test asserts that. `Classification.connexSubtree()` is Tn for the two free-connex
+  classes ({root} when relation-dominated) and *all* nodes for a general acyclic query, so the
+  evaluator can uniformly "reduce, join Tn, project". O is intersected with the BGP's variables
+  (the analyzer already guarantees that; the classifier is just total). `|O| ≥ 4` is asserted
+  never relation-dominated, in fixed cases and across 200 random rounds (seed 20260913). Not
+  wired into `YannakakisOpExecutor` yet. `mvn test`: 159/159 green.
