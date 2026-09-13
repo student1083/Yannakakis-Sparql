@@ -99,6 +99,54 @@ class YannakakisOpExecutorTest {
     }
 
     @Test
+    void outputVariablesAreConsultedWithoutLosingDuplicates() {
+        // two-hop paths: a-b-c, a-c-d, b-c-d. Projecting ?y ?z away must still
+        // yield ?x=a twice and ?x=b once (bag semantics).
+        Model m = ModelFactory.createDefaultModel();
+        m.add(m.createResource(NS + "a"), m.createProperty(NS + "knows"), m.createResource(NS + "b"));
+        m.add(m.createResource(NS + "a"), m.createProperty(NS + "knows"), m.createResource(NS + "c"));
+        m.add(m.createResource(NS + "b"), m.createProperty(NS + "knows"), m.createResource(NS + "c"));
+        m.add(m.createResource(NS + "c"), m.createProperty(NS + "knows"), m.createResource(NS + "d"));
+        String q = """
+                PREFIX ex: <http://example.org/>
+                SELECT ?x WHERE { ?x ex:knows ?y . ?y ex:knows ?z . }""";
+        YannakakisOpExecutor.resetCounter();
+        List<String> yann = runWithYannakakis(m, q);
+        assertEquals(run(m, q), yann);
+        assertEquals(List.of("x=http://example.org/a", "x=http://example.org/a", "x=http://example.org/b"), yann);
+        assertEquals(1, YannakakisOpExecutor.outputProjections(),
+                "the BGP should have emitted only its output variable ?x");
+    }
+
+    @Test
+    void analysisRunsOncePerQueryExecutionDespiteNestedExecutors() {
+        // Three ?p rows each push the OPTIONAL body through a fresh OpExecutor
+        // (ARQ's per-row index join); those must reuse the table stored in the
+        // shared per-execution Context rather than re-analysing.
+        Model m = ModelFactory.createDefaultModel();
+        for (String p : List.of("a", "b", "c")) {
+            m.add(m.createResource(NS + p), m.createProperty(NS + "hasType"), m.createResource(NS + "Person"));
+            m.add(m.createResource(NS + p), m.createProperty(NS + "knows"), m.createResource(NS + "x" + p));
+        }
+        m.add(m.createResource(NS + "a"), m.createProperty(NS + "nick"), m.createLiteral("Al"));
+        String q = """
+                PREFIX ex: <http://example.org/>
+                SELECT ?p ?nick WHERE {
+                  ?p ex:hasType ex:Person .
+                  OPTIONAL { ?p ex:nick ?nick }
+                  ?p ex:knows ?f .
+                }""";
+        YannakakisOpExecutor.resetCounter();
+        assertEquals(run(m, q), runWithYannakakis(m, q));
+        assertEquals(1, YannakakisOpExecutor.analyses(), "exactly one analysis per query execution");
+        assertTrue(YannakakisOpExecutor.invocations() >= 3, "nested executors should still intercept BGPs");
+
+        // and a second execution gets its own fresh analysis (per-execution Context)
+        runWithYannakakis(m, q);
+        assertEquals(2, YannakakisOpExecutor.analyses());
+    }
+
+    @Test
     void joinTreeCacheAvoidsRedecomposePerBindingShape() {
         // A plain BGP that syntactically follows an OPTIONAL group is chained via
         // OpSequence: it is executed exactly once, with the OPTIONAL's full

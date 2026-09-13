@@ -350,7 +350,129 @@ class DifferentialTest {
         }
     }
 
-    // ---- 4. property-style randomized differential tests --------------------
+    // ---- 4. output-variable projection (AlgebraContextAnalyzer wired in) -----
+
+    /**
+     * Assert agreement, that the Yannakakis path fired, and that at least one
+     * intercepted BGP actually emitted a strict subset of its variables — i.e.
+     * the analyzer's O was consulted and the dropped columns did not matter.
+     */
+    private static void assertSameBagFiredAndProjected(Model model, String query) {
+        YannakakisOpExecutor.resetCounter();
+        List<String> rows = assertSameBag(model, query);
+        assertTrue(YannakakisOpExecutor.invocations() >= 1, "expected the Yannakakis path to fire for:\n" + query);
+        assertTrue(YannakakisOpExecutor.outputProjections() >= 1, "expected an output projection for:\n" + query);
+        assertFalse(rows.isEmpty(), "test data should produce at least one row for:\n" + query);
+    }
+
+    @Nested
+    @DisplayName("BGPs emit only their output variables O and still match stock ARQ")
+    class OutputProjection {
+
+        @Test void nonDistinctProjectionKeepsDuplicates() {
+            // a knows b and c; both live somewhere -> ?x=a must appear once per path
+            List<String> rows = new ArrayList<>();
+            YannakakisOpExecutor.resetCounter();
+            rows.addAll(assertSameBag(socialModel(), PREFIX + """
+                    SELECT ?x WHERE { ?x ex:knows ?y . ?y ex:livesIn ?c . }"""));
+            assertTrue(YannakakisOpExecutor.outputProjections() >= 1);
+            assertTrue(rows.size() > new java.util.HashSet<>(rows).size(),
+                    "fixture should produce duplicate projected rows to make the test meaningful");
+        }
+
+        @Test void filterOnDroppedVariable() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x WHERE { ?x ex:knows ?y . ?y ex:name ?n . FILTER(?n != "Bob") }""");
+        }
+
+        @Test void filterExistsOnDroppedVariable() {
+            // ?y is needed only by the EXISTS pattern; it must survive the projection
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x WHERE {
+                      ?x ex:knows ?y . ?x ex:name ?n .
+                      FILTER EXISTS { ?y ex:livesIn ?c }
+                    }""");
+        }
+
+        @Test void filterNotExistsOnDroppedVariable() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x WHERE {
+                      ?x ex:knows ?y . ?x ex:name ?n .
+                      FILTER NOT EXISTS { ?y ex:livesIn ?c }
+                    }""");
+        }
+
+        @Test void orderByDroppedVariable() {
+            YannakakisOpExecutor.resetCounter();
+            assertSameOrdered(socialModel(), PREFIX + """
+                    SELECT ?x WHERE { ?x ex:knows ?y . ?y ex:name ?n . }
+                    ORDER BY ?n ?x""");
+            assertTrue(YannakakisOpExecutor.outputProjections() >= 1);
+        }
+
+        @Test void groupByCountOverDroppedVariable() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x (COUNT(?c) AS ?cnt) WHERE { ?x ex:knows ?y . ?y ex:livesIn ?c . }
+                    GROUP BY ?x""");
+        }
+
+        @Test void bindOnDroppedVariable() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x ?len WHERE { ?x ex:knows ?y . ?y ex:name ?n . BIND(STRLEN(?n) AS ?len) }""");
+        }
+
+        @Test void optionalJoinVariableNotProjected() {
+            // ?y joins the OPTIONAL side but is not projected: both BGPs must keep it
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x ?ct WHERE {
+                      ?x ex:knows ?y . ?x ex:name ?n .
+                      OPTIONAL { ?y ex:livesIn ?c . ?c ex:country ?ct . }
+                    }""");
+        }
+
+        @Test void joinVariableNotProjectedAcrossGroups() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x ?ct WHERE {
+                      { ?x ex:knows ?y . ?x ex:name ?n . }
+                      { ?y ex:livesIn ?c . ?c ex:country ?ct . }
+                    }""");
+        }
+
+        @Test void minusOnJoinVariableNotProjected() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x WHERE {
+                      ?x ex:knows ?y . ?x ex:name ?n .
+                      MINUS { ?y ex:livesIn ?c . ?c ex:country ?ct . }
+                    }""");
+        }
+
+        @Test void unionSharedVariableNotProjected() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?n WHERE {
+                      { ?x ex:knows ?y . ?x ex:name ?n . }
+                      UNION
+                      { ?y ex:livesIn ?c . ?y ex:name ?n . }
+                    }""");
+        }
+
+        @Test void subqueryWithAggregateOverDroppedVariable() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x ?cnt WHERE {
+                      ?x ex:knows ?y . ?x ex:name ?n .
+                      { SELECT ?y (COUNT(?z) AS ?cnt) WHERE { ?y ex:knows ?z . ?y ex:name ?m . } GROUP BY ?y }
+                    }""");
+        }
+
+        @Test void valuesJoinedOnUnprojectedVariable() {
+            assertSameBagFiredAndProjected(socialModel(), PREFIX + """
+                    SELECT ?x WHERE {
+                      VALUES ?y { ex:b ex:c }
+                      ?x ex:knows ?y . ?y ex:livesIn ?c .
+                    }""");
+        }
+    }
+
+    // ---- 5. property-style randomized differential tests --------------------
 
     @Nested
     @DisplayName("random graphs x random acyclic BGPs match stock ARQ")
@@ -377,6 +499,32 @@ class DifferentialTest {
                     "Yannakakis path should have fired in every round (fired=" + fired + ")");
         }
 
+        @Test void randomProjectedAcyclicBgpsMatchStockArq() {
+            // Same generator, but SELECT (non-DISTINCT) a random proper subset of the
+            // variables: the BGP then emits only O, and the bag of projected rows
+            // (with duplicates) must still equal stock ARQ's.
+            int projected = 0;
+            for (int round = 0; round < ROUNDS; round++) {
+                Random rnd = new Random(BASE_SEED + 1000 + round);
+                Model m = randomModel(rnd);
+                List<String> vars = new ArrayList<>();
+                String body = randomAcyclicBody(rnd, vars);
+                Collections.shuffle(vars, rnd);
+                List<String> keep = vars.subList(0, 1 + rnd.nextInt(vars.size() - 1));   // proper subset
+                String q = PREFIX + "SELECT " + String.join(" ", keep) + " WHERE {\n" + body + "}";
+
+                YannakakisOpExecutor.resetCounter();
+                List<String> stock = runBag(m, q);
+                List<String> yann = withYannakakis(m, q, false);
+                assertEquals(stock, yann,
+                        "seed=" + (BASE_SEED + 1000 + round) + " query:\n" + q);
+                assertTrue(YannakakisOpExecutor.invocations() >= 1);
+                projected += YannakakisOpExecutor.outputProjections();
+            }
+            assertTrue(projected >= ROUNDS,
+                    "every round projects a proper subset, so O should be strict each time (projected=" + projected + ")");
+        }
+
         /** ~20 random triples over 8 nodes and 3 predicates. */
         private static Model randomModel(Random rnd) {
             Model m = ModelFactory.createDefaultModel();
@@ -396,7 +544,11 @@ class DifferentialTest {
          * so the join structure is always a tree.
          */
         private static String randomAcyclicQuery(Random rnd) {
-            List<String> vars = new ArrayList<>();
+            return PREFIX + "SELECT * WHERE {\n" + randomAcyclicBody(rnd, new ArrayList<>()) + "}";
+        }
+
+        /** The BGP text of {@link #randomAcyclicQuery}; the ?v-variables used are added to {@code vars}. */
+        private static String randomAcyclicBody(Random rnd, List<String> vars) {
             vars.add("?v0");
             vars.add("?v1");
             StringBuilder bgp = new StringBuilder();
@@ -421,7 +573,7 @@ class DifferentialTest {
                 }
                 bgp.append(" .\n");
             }
-            return PREFIX + "SELECT * WHERE {\n" + bgp + "}";
+            return bgp.toString();
         }
 
         private static String pred(Random rnd, int patternIndex) {

@@ -4,6 +4,7 @@ import org.apache.jena.graph.Graph;
 import org.apache.jena.graph.Node;
 import org.apache.jena.graph.Triple;
 import org.apache.jena.query.ARQ;
+import org.apache.jena.sparql.algebra.Op;
 import org.apache.jena.sparql.algebra.op.OpBGP;
 import org.apache.jena.sparql.core.BasicPattern;
 import org.apache.jena.sparql.core.Var;
@@ -34,16 +35,43 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Custom ARQ physical executor. Intercepts BGP evaluation: alpha-acyclic BGPs
  * are evaluated with the standalone Yannakakis evaluator; cyclic BGPs (and the
  * no-active-graph case) fall through to stock ARQ unchanged.
+ *
+ * <p>On the first {@link #executeOp} call of a query execution (which receives the
+ * root of the plan) the {@link AlgebraContextAnalyzer} is run once over the whole
+ * tree and its table stored in the execution's {@code Context}. Each intercepted
+ * BGP then looks up its output variables O and emits only those columns; a BGP
+ * the analyzer never saw (ARQ manufactures fresh {@code OpBGP} objects for quad
+ * patterns and for the substituted right side of an index join) gets all of its
+ * variables, so nothing is ever dropped that the plan might still need.
  */
 public class YannakakisOpExecutor extends OpExecutor {
 
     public static final OpExecutorFactory FACTORY = YannakakisOpExecutor::new;
 
     private static final AtomicInteger COUNTER = new AtomicInteger();
+    private static final AtomicInteger ANALYSES = new AtomicInteger();
+    private static final AtomicInteger OUTPUT_PROJECTIONS = new AtomicInteger();
     private static OpExecutorFactory previous;
 
     public YannakakisOpExecutor(ExecutionContext execCxt) {
         super(execCxt);
+    }
+
+    @Override
+    protected QueryIterator exec(Op op, QueryIterator input) {
+        // Analyse once per query execution. ARQ enters an executor through the
+        // recursive step exec() (QC.execute -> OpExecutor.execute -> exec), not
+        // through executeOp(), and the very first exec() of an execution receives
+        // the plan root. Every later call -- the recursion within this executor,
+        // and the executors ARQ creates for sub-plans (per-row index joins,
+        // EXISTS, ...) -- shares this execution's Context and finds the table
+        // already there. The Context is created fresh per execution by
+        // QueryExecDatasetBuilder, so a table never leaks into the next query.
+        if (AlgebraContextAnalyzer.lookup(execCxt).isEmpty()) {
+            AlgebraContextAnalyzer.analyze(op, execCxt);
+            ANALYSES.incrementAndGet();
+        }
+        return super.exec(op, input);
     }
 
     @Override
@@ -58,7 +86,11 @@ public class YannakakisOpExecutor extends OpExecutor {
             return super.execute(opBGP, input);          // cyclic / no graph -> native ARQ
         }
         COUNTER.incrementAndGet();
-        return new Stage(pattern, input, execCxt);
+        Set<Var> outputVars = AlgebraContextAnalyzer.outputVarsOrAll(execCxt, opBGP);
+        if (!outputVars.containsAll(AlgebraContextAnalyzer.varsOf(pattern))) {
+            OUTPUT_PROJECTIONS.incrementAndGet();
+        }
+        return new Stage(pattern, outputVars, input, execCxt);
     }
 
     // ---- registration ---------------------------------------------------
@@ -75,17 +107,27 @@ public class YannakakisOpExecutor extends OpExecutor {
     }
 
     public static int invocations()  { return COUNTER.get(); }
-    public static void resetCounter() { COUNTER.set(0); }
+    /** Number of query executions for which the algebra analysis ran (one per execution). */
+    public static int analyses()     { return ANALYSES.get(); }
+    /** Number of intercepted BGPs whose output-variable set O was a strict subset of their variables. */
+    public static int outputProjections() { return OUTPUT_PROJECTIONS.get(); }
+    public static void resetCounter() {
+        COUNTER.set(0);
+        ANALYSES.set(0);
+        OUTPUT_PROJECTIONS.set(0);
+    }
 
     // ---- per-input-binding evaluation -----------------------------------
 
     private static final class Stage extends QueryIterRepeatApply {
         private final BasicPattern pattern;
+        private final Set<Var> outputVars;
         private final Map<Object, Optional<JoinTree>> joinTreeCache = new HashMap<>();
 
-        Stage(BasicPattern pattern, QueryIterator input, ExecutionContext execCxt) {
+        Stage(BasicPattern pattern, Set<Var> outputVars, QueryIterator input, ExecutionContext execCxt) {
             super(input, execCxt);
             this.pattern = pattern;
+            this.outputVars = outputVars;
         }
 
         @Override
@@ -121,11 +163,18 @@ public class YannakakisOpExecutor extends OpExecutor {
                                     + "vertices, never adds any, so an acyclic BGP's join tree survives "
                                     + "substitution intact (see GyoReductionTest#acyclicityPreservedUnderBinding)"));
 
-            // 5. extend the input binding with each result row
+            // 5. extend the input binding with each result row, keeping only the
+            // output variables O. This projection happens AFTER the full BGP result
+            // (a set of mappings) is materialised and does NOT deduplicate: each
+            // full row yields one output row, so the multiplicities are exactly
+            // those ARQ's own later projection would produce. It is therefore not
+            // the early (inside-the-fold) projection that needs bag semantics.
             List<Binding> out = new ArrayList<>(result.rowCount());
             for (Map<Var, Node> row : result.rows()) {
                 BindingBuilder bb = BindingFactory.builder(binding);
-                for (Map.Entry<Var, Node> e : row.entrySet()) bb.add(e.getKey(), e.getValue());
+                for (Map.Entry<Var, Node> e : row.entrySet()) {
+                    if (outputVars.contains(e.getKey())) bb.add(e.getKey(), e.getValue());
+                }
                 out.add(bb.build());
             }
             return QueryIterPlainWrapper.create(out.iterator(), getExecContext());

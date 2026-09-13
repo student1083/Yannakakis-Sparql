@@ -86,3 +86,19 @@ This file feeds Chapter 4.
   Expected sets in the tests were pinned against `Algebra.compile` output printed for each
   query beforehand. Not wired into `YannakakisOpExecutor` yet (no executor code touched).
   `mvn test`: 68/68 green.
+- Step 6 (wire `AlgebraContextAnalyzer` into `YannakakisOpExecutor`): the hook is an override of
+  the protected recursive step `exec(Op, QueryIterator)`, not `executeOp` — ARQ's static
+  `OpExecutor.execute` calls `exec` directly, so an `executeOp` override is never reached (found
+  by a failing `analyses()==1` assertion). "Once per execution" = "no table in the execution's
+  `Context` yet"; safe because `QueryExecDatasetBuilder` builds a fresh `Context` per execution
+  (it stamps `sysCurrentQuery` on it) and all nested executors share it. `execute(OpBGP)` looks
+  up `O` via `outputVarsOrAll` and `Stage` emits only those columns, after the full BGP result is
+  materialised and without dedup — multiplicities therefore match ARQ's later projection, so
+  this is not the early projection CLAUDE.md defers to step 10. Verified `ExprVars.varsMentioned`
+  includes the visible vars of `EXISTS`/`NOT EXISTS` patterns (via `ExprVarsWorker`), so a BGP
+  whose variable is only needed by an EXISTS keeps it. New counters `analyses()` and
+  `outputProjections()`; `DifferentialTest.OutputProjection` (13 cases: non-DISTINCT duplicates,
+  FILTER, EXISTS, NOT EXISTS, ORDER BY, GROUP BY/COUNT, BIND, OPTIONAL, group join, MINUS, UNION,
+  subquery aggregate, VALUES — each on a dropped variable) plus a projected variant of the
+  randomized suite (random proper subset of variables, non-DISTINCT, 30 rounds, seeds
+  20260706+1000..). `mvn test`: 84/84 green.

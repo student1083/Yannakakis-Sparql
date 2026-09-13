@@ -22,7 +22,7 @@ reflects the current source tree, not that stale description.
 | `JoinTree` | `JoinTree.java` | Rooted tree of hyperedges (one node per triple pattern) produced by `GyoReduction`; exposes `satisfiesRunningIntersection()` as a connectedness self-check used as a correctness oracle in tests, and a `pretty()` printer. |
 | `Relation` | `Relation.java` | Immutable set-of-tuples (`Var → Node` rows) representing a materialized triple pattern or intermediate result; provides `semijoin`, `join` (hash join on shared variables, cross product if none) and builder/factory methods. |
 | `YannakakisEvaluator` | `YannakakisEvaluator.java` | Given a `JoinTree` and one `Relation` per edge, runs upward semijoin → downward semijoin → upward join passes and returns the joined `Relation` at the root. |
-| `AlgebraContextAnalyzer` | `AlgebraContextAnalyzer.java` | Read-only, single-pass walk of an ARQ `Op` tree computing, per `OpBGP` (keyed by object identity), the output variables `O` the rest of the plan needs from that BGP (demand flows top-down: projection resets it; FILTER/ORDER BY/GROUP BY/aggregate/BIND expressions and all sibling operands of join-like operators extend it). Falls back to all variables, with a counted `FallbackReason`, under `OpExt`/`OpService`/`OpPropFunc`/`OpProcedure`. Stores its `Analysis` in the execution `Context` under `AlgebraContextAnalyzer.SYMBOL`. Never modifies the tree; not yet consulted by `YannakakisOpExecutor`. |
+| `AlgebraContextAnalyzer` | `AlgebraContextAnalyzer.java` | Read-only, single-pass walk of an ARQ `Op` tree computing, per `OpBGP` (keyed by object identity), the output variables `O` the rest of the plan needs from that BGP (demand flows top-down: projection resets it; FILTER/ORDER BY/GROUP BY/aggregate/BIND expressions and all sibling operands of join-like operators extend it). Falls back to all variables, with a counted `FallbackReason`, under `OpExt`/`OpService`/`OpPropFunc`/`OpProcedure`. Stores its `Analysis` in the execution `Context` under `AlgebraContextAnalyzer.SYMBOL`. Never modifies the tree. Run once per query execution by `YannakakisOpExecutor.exec` and consulted in `execute(OpBGP)`. |
 | `SmokeTest` | `SmokeTest.java` | Standalone `main()` toolchain check: builds a tiny in-memory model, runs a one-triple SPARQL query via stock Jena, prints the result. Not part of the tested surface. |
 | `AlgebraExplorer` | `AlgebraExplorer.java` | Demo `main()`: compiles a SPARQL query to the ARQ `Op` algebra tree, prints it, and walks each `OpBGP` describing every triple-pattern node's kind (variable/IRI/literal/blank). Not part of the tested surface. |
 | `HypergraphDemo` | `HypergraphDemo.java` | Demo `main()`: compiles a fixed SPARQL query and prints the `QueryHypergraph` built from its BGP. Not part of the tested surface. |
@@ -41,6 +41,17 @@ Traced through `YannakakisOpExecutor.java`.
    (`:40`). From then on, ARQ's main execution engine constructs a `YannakakisOpExecutor` per
    query execution and dispatches every `OpBGP` node to it.
 
+1b. **Algebra analysis, once per execution.** ARQ enters an executor through the protected
+   recursive step `exec(Op, QueryIterator)` (`QC.execute` → static `OpExecutor.execute` →
+   `exec`), *not* through `executeOp`. `YannakakisOpExecutor.exec` overrides it: if the
+   execution's `Context` holds no `AlgebraContextAnalyzer.Analysis` yet, it runs
+   `AlgebraContextAnalyzer.analyze(op, execCxt)` on the `op` it was given — which, for the
+   first call of an execution, is the root of the optimised plan — and stores the table under
+   `AlgebraContextAnalyzer.SYMBOL`. All later `exec` calls (the recursion within this executor,
+   and the fresh executors ARQ creates per row for index joins / EXISTS) share the same
+   per-execution `Context` and skip the analysis. `analyses()` counts these runs (one per
+   execution, asserted by `YannakakisOpExecutorTest#analysisRunsOncePerQueryExecutionDespiteNestedExecutors`).
+
 2. **Interception + acyclicity check.** `execute(OpBGP opBGP, QueryIterator input)` (`:49-62`)
    pulls the pattern via `opBGP.getPattern()` (`:51`) and the active graph via
    `execCxt.getActiveGraph()` (`:52`). It tests acyclicity at `:54-55`:
@@ -48,7 +59,11 @@ Traced through `YannakakisOpExecutor.java`.
    If false (cyclic BGP, or no active graph), it delegates unchanged: `return super.execute(opBGP,
    input)` (`:58`) — stock ARQ's default nested-loop join handles it from here on. Otherwise the
    invocation counter is bumped (`:60`, read by tests via `invocations()`/`resetCounter()`,
-   `:77-78`) and a `Stage` is returned (`:61`).
+   `:77-78`), the BGP's output variables `O` are fetched via
+   `AlgebraContextAnalyzer.outputVarsOrAll(execCxt, opBGP)` (all variables if the table has no
+   entry for this exact `OpBGP` object — ARQ manufactures fresh ones for quad patterns and for
+   the `Substitute`d right side of `QueryIterOptionalIndex`), `outputProjections()` is bumped
+   when `O` is a strict subset, and a `Stage` carrying `O` is returned.
 
 3. **Per-input-binding evaluation.** `Stage` (`:82-119`) extends `QueryIterRepeatApply`, so
    `nextStage(Binding binding)` (`:90-118`) runs once per binding arriving from the outer query
@@ -67,9 +82,13 @@ Traced through `YannakakisOpExecutor.java`.
    - **Evaluate** (`:107-108`): `jt.map(tree -> YannakakisEvaluator.evaluate(tree,
      rels)).orElseGet(() -> naiveFold(rels))` — Yannakakis pipeline if the substituted pattern is
      acyclic, else `naiveFold` (`:172-176`, plain left-to-right natural join) as a safety net.
-   - **Merge back into bindings** (`:110-117`): each row of the resulting `Relation` is layered
-     onto the *original* incoming `binding` via `BindingFactory.builder(binding)` (`:113`),
-     producing one `Binding` per result row, wrapped as a `QueryIterator` via
+   - **Merge back into bindings, restricted to `O`** (`:110-117`): each row of the resulting
+     `Relation` is layered onto the *original* incoming `binding` via
+     `BindingFactory.builder(binding)` (`:113`), adding only the columns in `O`. This happens
+     after the full BGP result (a set of mappings) is materialised and does not deduplicate —
+     one output `Binding` per full row — so multiplicities equal what ARQ's own later
+     projection would yield; it is not the early inside-the-fold projection that needs bag
+     semantics (CLAUDE.md, step 10). One `Binding` per result row, wrapped as a `QueryIterator` via
      `QueryIterPlainWrapper.create(out.iterator(), getExecContext())` (`:117`).
      `QueryIterRepeatApply` concatenates these across all incoming bindings and hands the result
      back up the ARQ iterator chain, where projection, `DISTINCT`, `ORDER BY`, etc. are all
