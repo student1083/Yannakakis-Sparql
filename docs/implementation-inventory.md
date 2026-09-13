@@ -62,8 +62,10 @@ Traced through `YannakakisOpExecutor.java`.
    `:77-78`), the BGP's output variables `O` are fetched via
    `AlgebraContextAnalyzer.outputVarsOrAll(execCxt, opBGP)` (all variables if the table has no
    entry for this exact `OpBGP` object — ARQ manufactures fresh ones for quad patterns and for
-   the `Substitute`d right side of `QueryIterOptionalIndex`), `outputProjections()` is bumped
-   when `O` is a strict subset, and a `Stage` carrying `O` is returned.
+   the `Substitute`d right side of `QueryIterOptionalIndex`; a missing `O` is never an error,
+   and an analysis that throws is caught in `exec`, logged, and replaced by an empty table),
+   `narrowedBgps()` is bumped when `O` is a strict subset, `O` is logged at debug, and a
+   `Stage` carrying `O` is returned.
 
 3. **Per-input-binding evaluation.** `Stage` (`:82-119`) extends `QueryIterRepeatApply`, so
    `nextStage(Binding binding)` (`:90-118`) runs once per binding arriving from the outer query
@@ -71,9 +73,13 @@ Traced through `YannakakisOpExecutor.java`.
    - **Substitute** (`:93-94`): each `Triple` in the original pattern has its bound variables
      replaced with concrete `Node`s via `substitute`/`sub` (`:123-133`), producing `bound`, a
      `BasicPattern` with fewer free variables.
-   - **Rebuild hypergraph + join tree** (`:97-98`): `GyoReduction.decompose(QueryHypergraph
+   - **Rebuild hypergraph + join tree, restrict `O`** (`:97-98`): `GyoReduction.decompose(QueryHypergraph
      .fromBasicPattern(bound))` runs again on the *substituted* pattern — not reusing the
-     acyclicity check from step 2 — returning `Optional<JoinTree>`.
+     acyclicity check from step 2 — returning `Optional<JoinTree>`. Alongside it, `O` is
+     restricted to the variables still free in `bound` (a variable the incoming binding already
+     bound is a constant now and is carried by the parent binding, not produced here) and logged
+     at debug. Both are cached per binding shape in a `ShapePlan`. The restricted `O` is
+     **not yet used** to change anything below; later steps consume it.
    - **Materialize against the live graph** (`:100-104`, via `matchTriple`, `:135-157`): for each
      triple in `bound`, `g.find(match(s), match(p), match(o))` queries the graph with
      `Node.ANY` wildcards for variable positions (`match`, `:159`); matching triples become rows
@@ -82,13 +88,10 @@ Traced through `YannakakisOpExecutor.java`.
    - **Evaluate** (`:107-108`): `jt.map(tree -> YannakakisEvaluator.evaluate(tree,
      rels)).orElseGet(() -> naiveFold(rels))` — Yannakakis pipeline if the substituted pattern is
      acyclic, else `naiveFold` (`:172-176`, plain left-to-right natural join) as a safety net.
-   - **Merge back into bindings, restricted to `O`** (`:110-117`): each row of the resulting
-     `Relation` is layered onto the *original* incoming `binding` via
-     `BindingFactory.builder(binding)` (`:113`), adding only the columns in `O`. This happens
-     after the full BGP result (a set of mappings) is materialised and does not deduplicate —
-     one output `Binding` per full row — so multiplicities equal what ARQ's own later
-     projection would yield; it is not the early inside-the-fold projection that needs bag
-     semantics (CLAUDE.md, step 10). One `Binding` per result row, wrapped as a `QueryIterator` via
+   - **Merge back into bindings** (`:110-117`): each row of the resulting `Relation` is layered
+     onto the *original* incoming `binding` via `BindingFactory.builder(binding)` (`:113`),
+     producing one `Binding` per result row — all variables, `O` is not applied here yet —
+     wrapped as a `QueryIterator` via
      `QueryIterPlainWrapper.create(out.iterator(), getExecContext())` (`:117`).
      `QueryIterRepeatApply` concatenates these across all incoming bindings and hands the result
      back up the ARQ iterator chain, where projection, `DISTINCT`, `ORDER BY`, etc. are all

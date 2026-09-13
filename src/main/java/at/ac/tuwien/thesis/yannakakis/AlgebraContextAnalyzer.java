@@ -235,6 +235,15 @@ public final class AlgebraContextAnalyzer {
         return analysis;
     }
 
+    /**
+     * A table with no entries: every lookup misses and {@link Analysis#outputVarsOrAll}
+     * yields all variables. Used by the executor when the analysis itself fails, so the
+     * failure is contained and not retried on every nested call.
+     */
+    public static Analysis emptyAnalysis() {
+        return new Analysis();
+    }
+
     /** The table stored by {@link #analyze(Op, ExecutionContext)}, if any. */
     public static Optional<Analysis> lookup(ExecutionContext execCxt) {
         Object stored = execCxt.getContext().get(SYMBOL);

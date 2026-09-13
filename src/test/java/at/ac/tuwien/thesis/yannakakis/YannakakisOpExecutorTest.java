@@ -1,5 +1,10 @@
 package at.ac.tuwien.thesis.yannakakis;
 
+import org.apache.jena.atlas.io.IndentedWriter;
+import org.apache.jena.graph.Graph;
+import org.apache.jena.graph.NodeFactory;
+import org.apache.jena.graph.Triple;
+import org.apache.jena.query.ARQ;
 import org.apache.jena.query.Query;
 import org.apache.jena.query.QueryExecution;
 import org.apache.jena.query.QueryExecutionFactory;
@@ -8,6 +13,19 @@ import org.apache.jena.query.QuerySolution;
 import org.apache.jena.query.ResultSet;
 import org.apache.jena.rdf.model.Model;
 import org.apache.jena.rdf.model.ModelFactory;
+import org.apache.jena.sparql.algebra.Op;
+import org.apache.jena.sparql.algebra.op.OpBGP;
+import org.apache.jena.sparql.algebra.op.OpExt;
+import org.apache.jena.sparql.algebra.op.OpJoin;
+import org.apache.jena.sparql.core.BasicPattern;
+import org.apache.jena.sparql.core.Var;
+import org.apache.jena.sparql.engine.ExecutionContext;
+import org.apache.jena.sparql.engine.QueryIterator;
+import org.apache.jena.sparql.engine.binding.Binding;
+import org.apache.jena.sparql.engine.binding.BindingFactory;
+import org.apache.jena.sparql.engine.main.QC;
+import org.apache.jena.sparql.serializer.SerializationContext;
+import org.apache.jena.sparql.util.NodeIsomorphismMap;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -15,6 +33,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class YannakakisOpExecutorTest {
@@ -99,9 +118,9 @@ class YannakakisOpExecutorTest {
     }
 
     @Test
-    void outputVariablesAreConsultedWithoutLosingDuplicates() {
-        // two-hop paths: a-b-c, a-c-d, b-c-d. Projecting ?y ?z away must still
-        // yield ?x=a twice and ?x=b once (bag semantics).
+    void outputVariablesAreLookedUpPerBgpWithoutChangingResults() {
+        // two-hop paths: a-b-c, a-c-d, b-c-d. O = {?x} for the BGP; results (with
+        // duplicates, bag semantics) must be exactly stock ARQ's.
         Model m = ModelFactory.createDefaultModel();
         m.add(m.createResource(NS + "a"), m.createProperty(NS + "knows"), m.createResource(NS + "b"));
         m.add(m.createResource(NS + "a"), m.createProperty(NS + "knows"), m.createResource(NS + "c"));
@@ -114,8 +133,59 @@ class YannakakisOpExecutorTest {
         List<String> yann = runWithYannakakis(m, q);
         assertEquals(run(m, q), yann);
         assertEquals(List.of("x=http://example.org/a", "x=http://example.org/a", "x=http://example.org/b"), yann);
-        assertEquals(1, YannakakisOpExecutor.outputProjections(),
-                "the BGP should have emitted only its output variable ?x");
+        assertEquals(1, YannakakisOpExecutor.narrowedBgps(),
+                "the analyzer should have found O = {?x}, a strict subset of the BGP's variables");
+    }
+
+    @Test
+    void failingAnalysisNeverFailsTheQuery() {
+        // An operator whose effectiveOp() throws makes the analysis blow up; the
+        // executor must swallow that, fall back to all variables, and still
+        // produce stock ARQ's answer. The operator itself is executable (eval is
+        // the identity), so stock ARQ handles the same plan without complaint.
+        Graph g = peopleModel().getGraph();
+        BasicPattern bp = new BasicPattern();
+        bp.add(Triple.create(Var.alloc("p1"), NodeFactory.createURI(NS + "knows"), Var.alloc("p2")));
+        bp.add(Triple.create(Var.alloc("p2"), NodeFactory.createURI(NS + "livesIn"), Var.alloc("city")));
+        Op plan = OpJoin.create(new OpExt("explodes") {
+            @Override public Op effectiveOp() { throw new IllegalStateException("boom"); }
+            @Override public QueryIterator eval(QueryIterator input, ExecutionContext execCxt) { return input; }
+            @Override public void outputArgs(IndentedWriter out, SerializationContext sCxt) {}
+            @Override public int hashCode() { return System.identityHashCode(this); }
+            @Override public boolean equalTo(Op other, NodeIsomorphismMap labelMap) { return this == other; }
+        }, new OpBGP(bp));
+
+        ExecutionContext stock = ExecutionContext.createForGraph(g, ARQ.getContext().copy());
+        ExecutionContext yann = ExecutionContext.createForGraph(g, ARQ.getContext().copy());
+        yann.setExecutor(YannakakisOpExecutor.FACTORY);
+
+        YannakakisOpExecutor.resetCounter();
+        List<String> expected = drain(QC.execute(plan, BindingFactory.empty(), stock));
+        List<String> actual = drain(QC.execute(plan, BindingFactory.empty(), yann));
+
+        assertEquals(expected, actual);
+        assertFalse(actual.isEmpty());
+        assertEquals(0, YannakakisOpExecutor.analyses(), "the analysis threw and must not count as a run");
+        assertTrue(YannakakisOpExecutor.invocations() >= 1, "the BGP was still intercepted");
+        assertTrue(AlgebraContextAnalyzer.lookup(yann).isPresent(), "an empty table is stored so nothing is retried");
+        assertEquals(0, AlgebraContextAnalyzer.lookup(yann).orElseThrow().size());
+    }
+
+    private static List<String> drain(QueryIterator it) {
+        List<String> rows = new ArrayList<>();
+        try {
+            while (it.hasNext()) {
+                Binding b = it.next();
+                List<String> cells = new ArrayList<>();
+                b.vars().forEachRemaining(v -> cells.add(v.getVarName() + "=" + b.get(v)));
+                Collections.sort(cells);
+                rows.add(String.join(" | ", cells));
+            }
+        } finally {
+            it.close();
+        }
+        Collections.sort(rows);
+        return rows;
     }
 
     @Test

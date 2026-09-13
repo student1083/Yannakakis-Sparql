@@ -20,6 +20,8 @@ import org.apache.jena.sparql.engine.main.OpExecutorFactory;
 import org.apache.jena.sparql.engine.main.QC;
 import org.apache.jena.sparql.util.Context;
 import org.apache.jena.util.iterator.ExtendedIterator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -36,40 +38,56 @@ import java.util.concurrent.atomic.AtomicInteger;
  * are evaluated with the standalone Yannakakis evaluator; cyclic BGPs (and the
  * no-active-graph case) fall through to stock ARQ unchanged.
  *
- * <p>On the first {@link #executeOp} call of a query execution (which receives the
- * root of the plan) the {@link AlgebraContextAnalyzer} is run once over the whole
- * tree and its table stored in the execution's {@code Context}. Each intercepted
- * BGP then looks up its output variables O and emits only those columns; a BGP
- * the analyzer never saw (ARQ manufactures fresh {@code OpBGP} objects for quad
- * patterns and for the substituted right side of an index join) gets all of its
- * variables, so nothing is ever dropped that the plan might still need.
+ * <p>On the first {@link #exec} call of a query execution (which receives the root
+ * of the plan) the {@link AlgebraContextAnalyzer} is run once over the whole tree
+ * and its table stored in the execution's {@code Context}. Each intercepted BGP
+ * then looks up its output variables O by object identity; a BGP the analyzer
+ * never saw (ARQ manufactures fresh {@code OpBGP} objects for quad patterns and
+ * for the substituted right side of an index join) gets all of its variables.
+ * O is currently only computed, restricted per incoming binding and logged — it
+ * does not change what the executor returns yet; later steps consume it.
  */
 public class YannakakisOpExecutor extends OpExecutor {
+
+    private static final Logger LOG = LoggerFactory.getLogger(YannakakisOpExecutor.class);
 
     public static final OpExecutorFactory FACTORY = YannakakisOpExecutor::new;
 
     private static final AtomicInteger COUNTER = new AtomicInteger();
     private static final AtomicInteger ANALYSES = new AtomicInteger();
-    private static final AtomicInteger OUTPUT_PROJECTIONS = new AtomicInteger();
+    private static final AtomicInteger NARROWED = new AtomicInteger();
     private static OpExecutorFactory previous;
 
     public YannakakisOpExecutor(ExecutionContext execCxt) {
         super(execCxt);
     }
 
+    /**
+     * Hook for the once-per-execution algebra analysis. This is the least invasive
+     * point available: ARQ enters an executor through this recursive step
+     * ({@code QC.execute} → static {@code OpExecutor.execute} → {@code exec}), not
+     * through {@code executeOp()}, and the very first {@code exec()} of an execution
+     * receives the root of the (already optimised) plan — so no
+     * {@code QueryEngineFactory} is needed to see the whole tree, and nothing is
+     * rewritten: the tree is only read. Every later call — the recursion within
+     * this executor, and the executors ARQ creates for sub-plans (per-row index
+     * joins, EXISTS, ...) — shares this execution's {@code Context} and finds the
+     * table already there. The {@code Context} is created fresh per execution by
+     * {@code QueryExecDatasetBuilder}, so a table never leaks into the next query.
+     */
     @Override
     protected QueryIterator exec(Op op, QueryIterator input) {
-        // Analyse once per query execution. ARQ enters an executor through the
-        // recursive step exec() (QC.execute -> OpExecutor.execute -> exec), not
-        // through executeOp(), and the very first exec() of an execution receives
-        // the plan root. Every later call -- the recursion within this executor,
-        // and the executors ARQ creates for sub-plans (per-row index joins,
-        // EXISTS, ...) -- shares this execution's Context and finds the table
-        // already there. The Context is created fresh per execution by
-        // QueryExecDatasetBuilder, so a table never leaks into the next query.
         if (AlgebraContextAnalyzer.lookup(execCxt).isEmpty()) {
-            AlgebraContextAnalyzer.analyze(op, execCxt);
-            ANALYSES.incrementAndGet();
+            try {
+                AlgebraContextAnalyzer.analyze(op, execCxt);
+                ANALYSES.incrementAndGet();
+            } catch (RuntimeException e) {
+                // The analysis is advisory: a failure must never fail the query.
+                // Store an empty table so every lookup falls back to all variables
+                // (and so the analysis is not retried on every nested exec()).
+                LOG.warn("algebra analysis failed; every BGP keeps all variables", e);
+                execCxt.getContext().set(AlgebraContextAnalyzer.SYMBOL, AlgebraContextAnalyzer.emptyAnalysis());
+            }
         }
         return super.exec(op, input);
     }
@@ -86,10 +104,13 @@ public class YannakakisOpExecutor extends OpExecutor {
             return super.execute(opBGP, input);          // cyclic / no graph -> native ARQ
         }
         COUNTER.incrementAndGet();
+        // O by OpBGP identity; all variables if this object was never analysed.
+        // A missing O is never an error.
         Set<Var> outputVars = AlgebraContextAnalyzer.outputVarsOrAll(execCxt, opBGP);
         if (!outputVars.containsAll(AlgebraContextAnalyzer.varsOf(pattern))) {
-            OUTPUT_PROJECTIONS.incrementAndGet();
+            NARROWED.incrementAndGet();
         }
+        LOG.debug("BGP {} output variables O = {}", pattern, outputVars);
         return new Stage(pattern, outputVars, input, execCxt);
     }
 
@@ -109,20 +130,26 @@ public class YannakakisOpExecutor extends OpExecutor {
     public static int invocations()  { return COUNTER.get(); }
     /** Number of query executions for which the algebra analysis ran (one per execution). */
     public static int analyses()     { return ANALYSES.get(); }
-    /** Number of intercepted BGPs whose output-variable set O was a strict subset of their variables. */
-    public static int outputProjections() { return OUTPUT_PROJECTIONS.get(); }
+    /**
+     * Number of intercepted BGPs whose output-variable set O (as looked up, before
+     * per-binding restriction) was a strict subset of their variables.
+     */
+    public static int narrowedBgps() { return NARROWED.get(); }
     public static void resetCounter() {
         COUNTER.set(0);
         ANALYSES.set(0);
-        OUTPUT_PROJECTIONS.set(0);
+        NARROWED.set(0);
     }
 
     // ---- per-input-binding evaluation -----------------------------------
 
+    /** Per binding-shape plan: the join tree and O restricted to the still-free variables. */
+    private record ShapePlan(Optional<JoinTree> joinTree, Set<Var> outputVars) {}
+
     private static final class Stage extends QueryIterRepeatApply {
         private final BasicPattern pattern;
         private final Set<Var> outputVars;
-        private final Map<Object, Optional<JoinTree>> joinTreeCache = new HashMap<>();
+        private final Map<Object, ShapePlan> planCache = new HashMap<>();
 
         Stage(BasicPattern pattern, Set<Var> outputVars, QueryIterator input, ExecutionContext execCxt) {
             super(input, execCxt);
@@ -136,12 +163,24 @@ public class YannakakisOpExecutor extends OpExecutor {
             BasicPattern bound = new BasicPattern();
             for (Triple t : pattern) bound.add(substitute(t, binding));
 
-            // 2. build hypergraph + join tree of the (substituted) BGP; the tree only
-            // depends on the BGP's shape (which positions are variables and which
-            // variables they are), not on the concrete bound node values, so it is
-            // cached per shape for the lifetime of this Stage.
-            Optional<JoinTree> jt = joinTreeCache.computeIfAbsent(shapeKey(bound),
-                    k -> GyoReduction.decompose(QueryHypergraph.fromBasicPattern(bound)));
+            // 2. build hypergraph + join tree of the (substituted) BGP, and restrict O
+            // to the variables still free after substitution (a variable the incoming
+            // binding already bound is a constant in `bound` and is carried by the
+            // parent binding, not produced here). Both depend only on the BGP's shape
+            // (which positions are variables and which variables they are), not on
+            // the concrete bound node values, so they are cached per shape for the
+            // lifetime of this Stage.
+            ShapePlan plan = planCache.computeIfAbsent(shapeKey(bound), k -> {
+                Set<Var> free = AlgebraContextAnalyzer.varsOf(bound);
+                Set<Var> restricted = new LinkedHashSet<>();
+                for (Var v : outputVars) if (free.contains(v)) restricted.add(v);
+                LOG.debug("BGP {} under binding {}: O restricted to free variables = {}",
+                        bound, binding, restricted);
+                return new ShapePlan(GyoReduction.decompose(QueryHypergraph.fromBasicPattern(bound)), restricted);
+            });
+            Optional<JoinTree> jt = plan.joinTree();
+            // plan.outputVars() is computed and logged but NOT yet used to change the
+            // result below; later steps consume it.
 
             // 3. materialize each pattern against the live graph
             Graph graph = getExecContext().getActiveGraph();
@@ -163,18 +202,11 @@ public class YannakakisOpExecutor extends OpExecutor {
                                     + "vertices, never adds any, so an acyclic BGP's join tree survives "
                                     + "substitution intact (see GyoReductionTest#acyclicityPreservedUnderBinding)"));
 
-            // 5. extend the input binding with each result row, keeping only the
-            // output variables O. This projection happens AFTER the full BGP result
-            // (a set of mappings) is materialised and does NOT deduplicate: each
-            // full row yields one output row, so the multiplicities are exactly
-            // those ARQ's own later projection would produce. It is therefore not
-            // the early (inside-the-fold) projection that needs bag semantics.
+            // 5. extend the input binding with each result row
             List<Binding> out = new ArrayList<>(result.rowCount());
             for (Map<Var, Node> row : result.rows()) {
                 BindingBuilder bb = BindingFactory.builder(binding);
-                for (Map.Entry<Var, Node> e : row.entrySet()) {
-                    if (outputVars.contains(e.getKey())) bb.add(e.getKey(), e.getValue());
-                }
+                for (Map.Entry<Var, Node> e : row.entrySet()) bb.add(e.getKey(), e.getValue());
                 out.add(bb.build());
             }
             return QueryIterPlainWrapper.create(out.iterator(), getExecContext());

@@ -102,3 +102,22 @@ This file feeds Chapter 4.
   subquery aggregate, VALUES — each on a dropped variable) plus a projected variant of the
   randomized suite (random proper subset of variables, non-DISTINCT, 30 rounds, seeds
   20260706+1000..). `mvn test`: 84/84 green.
+- Step 6, correction against the wiring checklist: the previous entry's "Stage emits only the O
+  columns" overstepped the checklist item "do not use O to change any behaviour yet". Reverted:
+  `Stage` now emits all variables again; `O` is looked up, restricted per binding shape to the
+  variables still free after substitution (cached in a `ShapePlan` next to the join tree),
+  logged at debug, and otherwise unused. `outputProjections()` renamed `narrowedBgps()` (counts
+  BGPs whose looked-up `O` is a strict subset — an analyzer metric, not a projection). The
+  analysis call in `exec` is now guarded: a throwing analyzer is logged and replaced by
+  `AlgebraContextAnalyzer.emptyAnalysis()` so the query proceeds with all variables and the
+  failure is not retried per nested call (`YannakakisOpExecutorTest#failingAnalysisNeverFailsTheQuery`,
+  built by hand from an `OpExt` whose `effectiveOp()` throws, run via `QC.execute` with
+  `ExecutionContext.setExecutor(FACTORY)`). The 13 dropped-variable differential cases moved out
+  of `DifferentialTest` into the new `OutputVariableSafetyTest`: a flat 62-query corpus (every
+  query from `DifferentialTest`, `YannakakisOpExecutorTest`, `EngineComparisonTest`,
+  `Tdb2AuditScratchTest`, `AlgebraContextAnalyzerTest`, exact duplicates collapsed, plus the 13)
+  run as one `@ParameterizedTest` over a single superset `Dataset` (default graph + named graph
+  `g1` so the `GRAPH` queries are non-trivial); canonical comparison, ORDER BY queries compared
+  ordered, the bare-LIMIT query by row count. Omitted the `SERVICE` query (remote call); the two
+  analyzer ORDER BY queries got a tie-breaking `?x` so both engines' order is well-defined.
+  `mvn test`: 136/136 green.
