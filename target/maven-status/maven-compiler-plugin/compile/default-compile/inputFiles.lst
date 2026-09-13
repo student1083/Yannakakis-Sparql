@@ -1,8 +1,10 @@
+G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\AlgebraContextAnalyzer.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\AlgebraExplorer.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\GyoDemo.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\GyoReduction.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\HypergraphDemo.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\JoinTree.java
+G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\QueryClassifier.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\QueryHypergraph.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\Relation.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\SmokeTest.java
@@ -10,3 +12,4 @@ G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\Yannakakis
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\YannakakisEvaluator.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\YannakakisIntuitionDemo.java
 G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\YannakakisOpExecutor.java
+G:\dev\yannakakis-sparql\src\main\java\at\ac\tuwien\thesis\yannakakis\YannakakisPlusEvaluator.java

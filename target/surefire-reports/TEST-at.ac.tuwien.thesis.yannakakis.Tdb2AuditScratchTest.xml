@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.211" tests="5" errors="0" skipped="0" failures="0">
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.191" tests="5" errors="0" skipped="0" failures="0">
   <properties>
     <property name="java.specification.version" value="21"/>
     <property name="sun.cpu.isalist" value="amd64"/>
@@ -16,7 +16,7 @@
     <property name="sun.java.launcher" value="SUN_STANDARD"/>
     <property name="user.country" value="GB"/>
     <property name="sun.boot.library.path" value="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin"/>
-    <property name="sun.java.command" value="C:\Users\eleborn\AppData\Local\Temp\surefire15795745523506716818\surefirebooter-20260913150441947_3.jar C:\Users\eleborn\AppData\Local\Temp\surefire15795745523506716818 2026-09-13T15-04-41_854-jvmRun1 surefire-20260913150441947_1tmp surefire_0-20260913150441947_2tmp"/>
+    <property name="sun.java.command" value="C:\Users\eleborn\AppData\Local\Temp\surefire2089285256321450280\surefirebooter-20260913163231948_3.jar C:\Users\eleborn\AppData\Local\Temp\surefire2089285256321450280 2026-09-13T16-32-31_823-jvmRun1 surefire-20260913163231948_1tmp surefire_0-20260913163231948_2tmp"/>
     <property name="jdk.debug" value="release"/>
     <property name="surefire.test.class.path" value="G:\dev\yannakakis-sparql\target\test-classes;G:\dev\yannakakis-sparql\target\classes;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-rdfpatch\6.0.0\jena-rdfpatch-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-arq\6.0.0\jena-arq-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-core\6.0.0\jena-core-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-base\6.0.0\jena-base-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\commons\commons-csv\1.14.1\commons-csv-1.14.1.jar;C:\Users\eleborn\.m2\repository\commons-io\commons-io\2.21.0\commons-io-2.21.0.jar;C:\Users\eleborn\.m2\repository\commons-codec\commons-codec\1.20.0\commons-codec-1.20.0.jar;C:\Users\eleborn\.m2\repository\org\apache\commons\commons-compress\1.28.0\commons-compress-1.28.0.jar;C:\Users\eleborn\.m2\repository\org\apache\commons\commons-collections4\4.5.0\commons-collections4-4.5.0.jar;C:\Users\eleborn\.m2\repository\com\github\ben-manes\caffeine\caffeine\3.2.3\caffeine-3.2.3.jar;C:\Users\eleborn\.m2\repository\org\jspecify\jspecify\1.0.0\jspecify-1.0.0.jar;C:\Users\eleborn\.m2\repository\com\github\andrewoma\dexx\collection\0.7\collection-0.7.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-iri3986\6.0.0\jena-iri3986-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-langtag\6.0.0\jena-langtag-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\roaringbitmap\RoaringBitmap\1.3.0\RoaringBitmap-1.3.0.jar;C:\Users\eleborn\.m2\repository\com\google\code\gson\gson\2.13.2\gson-2.13.2.jar;C:\Users\eleborn\.m2\repository\com\google\errorprone\error_prone_annotations\2.41.0\error_prone_annotations-2.41.0.jar;C:\Users\eleborn\.m2\repository\org\slf4j\jcl-over-slf4j\2.0.17\jcl-over-slf4j-2.0.17.jar;C:\Users\eleborn\.m2\repository\com\apicatalog\titanium-json-ld\1.7.0\titanium-json-ld-1.7.0.jar;C:\Users\eleborn\.m2\repository\com\apicatalog\titanium-jcs\1.1.1\titanium-jcs-1.1.1.jar;C:\Users\eleborn\.m2\repository\com\apicatalog\titanium-rdf-api\1.0.0\titanium-rdf-api-1.0.0.jar;C:\Users\eleborn\.m2\repository\com\apicatalog\titanium-rdf-n-quads\1.0.2\titanium-rdf-n-quads-1.0.2.jar;C:\Users\eleborn\.m2\repository\org\glassfish\jakarta.json\2.0.1\jakarta.json-2.0.1.jar;C:\Users\eleborn\.m2\repository\com\google\protobuf\protobuf-java\4.33.4\protobuf-java-4.33.4.jar;C:\Users\eleborn\.m2\repository\org\apache\thrift\libthrift\0.22.0\libthrift-0.22.0.jar;C:\Users\eleborn\.m2\repository\org\apache\commons\commons-lang3\3.20.0\commons-lang3-3.20.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-ontapi\6.0.0\jena-ontapi-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-shacl\6.0.0\jena-shacl-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-shex\6.0.0\jena-shex-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-tdb1\6.0.0\jena-tdb1-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-tdb2\6.0.0\jena-tdb2-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-dboe-storage\6.0.0\jena-dboe-storage-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-dboe-trans-data\6.0.0\jena-dboe-trans-data-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-dboe-transaction\6.0.0\jena-dboe-transaction-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-dboe-base\6.0.0\jena-dboe-base-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-dboe-index\6.0.0\jena-dboe-index-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\apache\jena\jena-rdfconnection\6.0.0\jena-rdfconnection-6.0.0.jar;C:\Users\eleborn\.m2\repository\org\junit\jupiter\junit-jupiter\5.11.4\junit-jupiter-5.11.4.jar;C:\Users\eleborn\.m2\repository\org\junit\jupiter\junit-jupiter-api\5.11.4\junit-jupiter-api-5.11.4.jar;C:\Users\eleborn\.m2\repository\org\opentest4j\opentest4j\1.3.0\opentest4j-1.3.0.jar;C:\Users\eleborn\.m2\repository\org\junit\platform\junit-platform-commons\1.11.4\junit-platform-commons-1.11.4.jar;C:\Users\eleborn\.m2\repository\org\apiguardian\apiguardian-api\1.1.2\apiguardian-api-1.1.2.jar;C:\Users\eleborn\.m2\repository\org\junit\jupiter\junit-jupiter-params\5.11.4\junit-jupiter-params-5.11.4.jar;C:\Users\eleborn\.m2\repository\org\junit\jupiter\junit-jupiter-engine\5.11.4\junit-jupiter-engine-5.11.4.jar;C:\Users\eleborn\.m2\repository\org\junit\platform\junit-platform-engine\1.11.4\junit-platform-engine-1.11.4.jar;C:\Users\eleborn\.m2\repository\org\slf4j\slf4j-simple\2.0.16\slf4j-simple-2.0.16.jar;C:\Users\eleborn\.m2\repository\org\slf4j\slf4j-api\2.0.16\slf4j-api-2.0.16.jar;"/>
     <property name="sun.cpu.endian" value="little"/>
@@ -31,7 +31,7 @@
     <property name="line.separator" value="&#10;"/>
     <property name="java.vm.specification.vendor" value="Oracle Corporation"/>
     <property name="java.specification.name" value="Java Platform API Specification"/>
-    <property name="surefire.real.class.path" value="C:\Users\eleborn\AppData\Local\Temp\surefire15795745523506716818\surefirebooter-20260913150441947_3.jar"/>
+    <property name="surefire.real.class.path" value="C:\Users\eleborn\AppData\Local\Temp\surefire2089285256321450280\surefirebooter-20260913163231948_3.jar"/>
     <property name="user.script" value=""/>
     <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
     <property name="java.runtime.version" value="21.0.12.1+1-LTS"/>
@@ -52,7 +52,7 @@
     <property name="java.vm.specification.name" value="Java Virtual Machine Specification"/>
     <property name="sun.os.patch.level" value=""/>
     <property name="native.encoding" value="Cp1252"/>
-    <property name="java.library.path" value="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin;C:\WINDOWS\Sun\Java\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\Users\eleborn\bin;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\local\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Users\eleborn\bin;C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0;C:\WINDOWS\System32\OpenSSH;C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\dotnet;C:\Program Files\Git\cmd;C:\Users\eleborn\AppData\Local\Microsoft\WindowsApps;C:\Users\eleborn\AppData\Local\Microsoft\WinGet\Links;G:\dev\apache-maven-3.9.16\bin;C:\Users\eleborn\.local\bin;C:\Program Files\Git\usr\bin\vendor_perl;C:\Program Files\Git\usr\bin\core_perl;."/>
+    <property name="java.library.path" value="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin;C:\WINDOWS\Sun\Java\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\dotnet\;C:\Program Files\Git\cmd;C:\Users\eleborn\AppData\Local\Microsoft\WindowsApps;C:\Users\eleborn\AppData\Local\Microsoft\WinGet\Links;G:\dev\apache-maven-3.9.16\bin;C:\Users\eleborn\.local\bin;;."/>
     <property name="java.vm.info" value="mixed mode, sharing"/>
     <property name="stderr.encoding" value="Cp1252"/>
     <property name="java.vendor" value="Eclipse Adoptium"/>
@@ -60,24 +60,24 @@
     <property name="sun.io.unicode.encoding" value="UnicodeLittle"/>
     <property name="java.class.version" value="65.0"/>
   </properties>
-  <testcase name="auditMemModelGlobalRegistration" classname="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.019">
+  <testcase name="auditMemModelGlobalRegistration" classname="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.006">
     <system-out><![CDATA[Jena ARQ version: 6.0.0
-TDB2 store dir: G:\dev\yannakakis-sparql\target\tdb2-audit\20260913-150442\store
+TDB2 store dir: G:\dev\yannakakis-sparql\target\tdb2-audit\20260913-163233\store
 TDB2 dataset class: org.apache.jena.tdb2.store.DatasetGraphSwitchable
 TDB2 dataset ctx factory: org.apache.jena.tdb2.solver.OpExecutorTDB2$1
 mem dataset class: org.apache.jena.sparql.core.DatasetGraphMap
 mem dataset ctx factory: <null> (-> OpExecutor.stdFactory)
 global ARQ ctx factory (before register): <null> (-> OpExecutor.stdFactory)
-global ARQ ctx stage generator: at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8
+global ARQ ctx stage generator: at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8
 global optFilterPlacement: null optFilterPlacementBGP: null
 
 ==================================================================
 E. in-memory Model via QueryExecutionFactory.create(q, model), register() (control, as existing tests)
 ==================================================================
 --- query: default-bgp
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   yannakakis invocations : 1
   stage generator calls  : <none>
   explain log (stderr)   :
@@ -97,9 +97,9 @@ E. in-memory Model via QueryExecutionFactory.create(q, model), register() (contr
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
 
 --- query: filter-last-var
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   yannakakis invocations : 1
   stage generator calls  : <none>
   explain log (stderr)   :
@@ -121,9 +121,9 @@ E. in-memory Model via QueryExecutionFactory.create(q, model), register() (contr
   rows (1)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna]
 
 --- query: filter-first-var
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   yannakakis invocations : 2
   stage generator calls  : <none>
   explain log (stderr)   :
@@ -144,9 +144,9 @@ E. in-memory Model via QueryExecutionFactory.create(q, model), register() (contr
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
 
 --- query: cyclic-triangle
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   yannakakis invocations : 0
   stage generator calls  : 
       stageGenerator(StageGeneratorDirectTDB) size=3 activeGraph=org.apache.jena.memvalue.GraphMemValue
@@ -178,14 +178,14 @@ E. in-memory Model via QueryExecutionFactory.create(q, model), register() (contr
 
 ]]></system-out>
   </testcase>
-  <testcase name="auditTdb2NoRegistration" classname="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.014">
+  <testcase name="auditTdb2NoRegistration" classname="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.013">
     <system-out><![CDATA[==================================================================
 B. TDB2 dataset, nothing registered (baseline)
 ==================================================================
 --- query: default-bgp
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -216,7 +216,7 @@ B. TDB2 dataset, nothing registered (baseline)
 --- query: graph-named
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -249,7 +249,7 @@ B. TDB2 dataset, nothing registered (baseline)
 --- query: graph-var
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -282,7 +282,7 @@ B. TDB2 dataset, nothing registered (baseline)
 --- query: filter-last-var
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -316,7 +316,7 @@ B. TDB2 dataset, nothing registered (baseline)
 --- query: filter-first-var
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -347,7 +347,7 @@ B. TDB2 dataset, nothing registered (baseline)
 --- query: cyclic-triangle
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -388,7 +388,7 @@ A. TDB2 dataset, YannakakisOpExecutor.register() (global ARQ context)
 --- query: default-bgp
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -419,7 +419,7 @@ A. TDB2 dataset, YannakakisOpExecutor.register() (global ARQ context)
 --- query: graph-named
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -452,7 +452,7 @@ A. TDB2 dataset, YannakakisOpExecutor.register() (global ARQ context)
 --- query: graph-var
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -485,7 +485,7 @@ A. TDB2 dataset, YannakakisOpExecutor.register() (global ARQ context)
 --- query: filter-last-var
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -519,7 +519,7 @@ A. TDB2 dataset, YannakakisOpExecutor.register() (global ARQ context)
 --- query: filter-first-var
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -550,7 +550,7 @@ A. TDB2 dataset, YannakakisOpExecutor.register() (global ARQ context)
 --- query: cyclic-triangle
   factory in query ctx   : org.apache.jena.tdb2.solver.OpExecutorTDB2$1
   executor constructed   : org.apache.jena.tdb2.solver.OpExecutorTDB2
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : <none>
@@ -584,14 +584,14 @@ A. TDB2 dataset, YannakakisOpExecutor.register() (global ARQ context)
 
 ]]></system-out>
   </testcase>
-  <testcase name="auditTdb2PerDatasetRegistration" classname="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.011">
+  <testcase name="auditTdb2PerDatasetRegistration" classname="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.008">
     <system-out><![CDATA[==================================================================
 C. TDB2 dataset, factory set on the DATASET context only (proposed fix, probe only)
 ==================================================================
 --- query: default-bgp
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 1
   stage generator calls  : <none>
@@ -612,9 +612,9 @@ C. TDB2 dataset, factory set on the DATASET context only (proposed fix, probe on
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
 
 --- query: graph-named
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 1
   stage generator calls  : <none>
@@ -637,9 +637,9 @@ C. TDB2 dataset, factory set on the DATASET context only (proposed fix, probe on
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
 
 --- query: graph-var
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 1
   stage generator calls  : <none>
@@ -662,9 +662,9 @@ C. TDB2 dataset, factory set on the DATASET context only (proposed fix, probe on
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna | g=http://example.org/g1, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz | g=http://example.org/g1]
 
 --- query: filter-last-var
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 1
   stage generator calls  : <none>
@@ -687,9 +687,9 @@ C. TDB2 dataset, factory set on the DATASET context only (proposed fix, probe on
   rows (1)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna]
 
 --- query: filter-first-var
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 2
   stage generator calls  : <none>
@@ -711,9 +711,9 @@ C. TDB2 dataset, factory set on the DATASET context only (proposed fix, probe on
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
 
 --- query: cyclic-triangle
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.tdb2.store.GraphViewSwitchable  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : 
@@ -738,14 +738,14 @@ C. TDB2 dataset, factory set on the DATASET context only (proposed fix, probe on
 
 ]]></system-out>
   </testcase>
-  <testcase name="auditMemDatasetGlobalRegistration" classname="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.006">
+  <testcase name="auditMemDatasetGlobalRegistration" classname="at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest" time="0.008">
     <system-out><![CDATA[==================================================================
 D. in-memory general Dataset, YannakakisOpExecutor.register() (control)
 ==================================================================
 --- query: default-bgp
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 1
   stage generator calls  : <none>
@@ -766,9 +766,9 @@ D. in-memory general Dataset, YannakakisOpExecutor.register() (control)
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
 
 --- query: graph-named
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 1
   stage generator calls  : <none>
@@ -792,9 +792,9 @@ D. in-memory general Dataset, YannakakisOpExecutor.register() (control)
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
 
 --- query: graph-var
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 1
   stage generator calls  : <none>
@@ -818,9 +818,9 @@ D. in-memory general Dataset, YannakakisOpExecutor.register() (control)
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna | g=http://example.org/g1, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz | g=http://example.org/g1]
 
 --- query: filter-last-var
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 1
   stage generator calls  : <none>
@@ -843,9 +843,9 @@ D. in-memory general Dataset, YannakakisOpExecutor.register() (control)
   rows (1)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna]
 
 --- query: filter-first-var
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 2
   stage generator calls  : <none>
@@ -867,9 +867,9 @@ D. in-memory general Dataset, YannakakisOpExecutor.register() (control)
   rows (2)           : [a=http://example.org/a | b=http://example.org/b | c=http://example.org/vienna, a=http://example.org/b | b=http://example.org/c | c=http://example.org/graz]
 
 --- query: cyclic-triangle
-  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x00000281811d37d8 [== YannakakisOpExecutor.FACTORY]
+  factory in query ctx   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor$$Lambda/0x000001df8e238f90 [== YannakakisOpExecutor.FACTORY]
   executor constructed   : at.ac.tuwien.thesis.yannakakis.YannakakisOpExecutor
-  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x00000281812b69c8 (wrapped by the audit recorder)
+  stage generator        : at.ac.tuwien.thesis.yannakakis.Tdb2AuditScratchTest$$Lambda/0x000001df8e32bbb8 (wrapped by the audit recorder)
   dataset default graph  : org.apache.jena.sparql.core.DatasetGraphMap$NamedGraphWrapper  (identity-stable across getDefaultGraph() calls: true)
   yannakakis invocations : 0
   stage generator calls  : 

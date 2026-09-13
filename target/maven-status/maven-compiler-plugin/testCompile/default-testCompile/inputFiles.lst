@@ -1,7 +1,12 @@
+G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\AlgebraContextAnalyzerTest.java
 G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\DifferentialTest.java
 G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\EngineComparisonTest.java
 G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\GyoReductionTest.java
+G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\OutputVariableSafetyTest.java
+G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\QueryClassifierTest.java
 G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\QueryHypergraphTest.java
+G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\RelationTest.java
 G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\Tdb2AuditScratchTest.java
 G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\YannakakisEvaluatorTest.java
 G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\YannakakisOpExecutorTest.java
+G:\dev\yannakakis-sparql\src\test\java\at\ac\tuwien\thesis\yannakakis\YannakakisPlusEvaluatorTest.java

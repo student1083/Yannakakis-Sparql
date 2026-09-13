@@ -139,3 +139,78 @@ This file feeds Chapter 4.
   (the analyzer already guarantees that; the classifier is just total). `|O| ≥ 4` is asserted
   never relation-dominated, in fixed cases and across 200 random rounds (seed 20260913). Not
   wired into `YannakakisOpExecutor` yet. `mvn test`: 159/159 green.
+- Step 9 (`YannakakisPlusEvaluator`: Wang et al. Algorithm 1, first round): new class,
+  `YannakakisEvaluator` untouched and used as the differential oracle (π_O of its full join).
+  `firstRound(tree, O, rels)` follows the pseudo-code literally over the tree rooted by the
+  classifier: "leaf" is tested on the shrinking tree (a node whose children were all absorbed is
+  a leaf when its turn comes), A_i^- is computed over the whole query (a var in ≥ 2 hyperedges),
+  the absorption `Rp ⋈ π_{A_p}(R_i)` is performed as a join and counted as an absorption even
+  though under set semantics it equals a semijoin, because the Chapter 3 claim counts semijoins.
+  Returns a `Reduced` record: the reduced `JoinTree` (fresh nodes over the surviving
+  hyperedges with their original parent links — valid because an absorbed node was a leaf, so
+  what remains is a connected subtree containing the root), surviving relations, and the
+  semijoin/absorption counters. `Relation.project(Set<Var>)` added (schema ∩ vars, set-based).
+  Theorem 3.11 short-circuit: `evaluateRelationDominated` requires O ⊆ A_root (throws otherwise)
+  and asserts one node + zero semijoins after the round; `evaluate(Classification, rels)` uses
+  it for `RELATION_DOMINATED` and otherwise finishes with `Reduced.answer()`, a plain join of
+  the reduced tree plus π_O — the correctness finish needed to diff against the oracle, not the
+  paper's second round. The executor still runs the classical evaluator: projecting onto O
+  early collapses duplicates that non-DISTINCT queries keep, so wiring waits for step 10's
+  multiplicities. Hence "OutputVariableSafetyTest against the Plus evaluator" is done at the
+  BGP level (`YannakakisPlusEvaluatorTest`): every corpus query compiled, O per BGP from
+  `AlgebraContextAnalyzer.analyze(op)` exactly as the executor looks it up, relations matched
+  against the corpus graph, cyclic BGPs skipped (the executor delegates them), then Plus vs
+  oracle on the classified tree, with the theorem asserted on every relation-dominated BGP
+  (≥ 10 in the corpus). Fixed cases pin the reduced tree (1 node / 0 semijoins / n−1
+  absorptions for dominated; 3 nodes / 2 semijoins for the path with O = endpoints), plus a
+  200-round random suite (same shape/O draws and seed as `QueryClassifierTest`, random 0–5-row
+  relations over four constants) covering all three classes. `mvn test`: 234/234 green.
+- Step 10 (multiplicities, the counting semiring) and Algorithm 2 (second round), wired into the
+  executor. `Relation` now stores distinct tuple → positive count: `project` sums collapsed rows,
+  `join` multiplies, `semijoin` keeps the left count, graph matches start at 1, `distinct()` sets
+  every count to 1. That makes round one's absorption `Rp ⋈ π_{A_p}(R_i)` bag-exact for free
+  (the multiplicities of the absorbed leaf's non-output columns are summed into the parent) and
+  is why the paper writes it as a join, not a semijoin. The DISTINCT switch is a per-BGP flag
+  computed by `AlgebraContextAnalyzer` (`Entry.countsCollapsible`): true below an `OpDistinct`
+  until a multiplicity-sensitive operator intervenes — `OpGroup` (aggregates count duplicates),
+  `OpSlice`/`OpTopN` (LIMIT over a bag), `OpExtend`/`OpAssign`/`OpUnfold` (RAND/UUID/BNODE would
+  give duplicates different values), any fallback operator — and also true for the right operand
+  of MINUS / semijoin / anti-join, where only existence matters; `OpReduced` is deliberately not a
+  DISTINCT (stock ARQ keeps some duplicates under REDUCED and the differential tests would see
+  it). The algorithms never look at the flag; `Stage.nextStage` applies `distinct()` at the very
+  end and otherwise emits each row `count` times. The executor now runs the full pipeline:
+  classify per binding shape (cached), `YannakakisPlusEvaluator.evaluate`, emit π_O — the
+  advisory-only O of step 6b is consumed from here on. `GyoReduction`'s test counter moved from
+  `decompose` to `reduce` (`gyoRunCount`) because `classify` bypasses `decompose`; the cache
+  test's arithmetic (growth 4 vs 6) is unchanged since a bound single-edge pattern costs one run.
+  Algorithm 2: the dangling-free node is always the blob the root has grown into (a join of a
+  dangling-free relation with an upward-reduced child stays dangling-free), a child R_j is
+  reducible iff no other neighbour of R_i *or of R_j* still uses a variable of D = (A_i ∩ A_j) \ O
+  — the one-sided condition "A_k ∩ A_i ⊆ O for R_i's other neighbours" is not enough: on the star
+  {x,a},{x,b},{x,c} with O = {a,b,c} it lets the merge of two arms drop x while the third arm
+  still joins on it. The literal else branch (`R_j := R_j ⋉ R_i` only) cannot terminate there
+  either: reducibility is a property of the variable sets, not the data, so no semijoin ever
+  creates a reducible pair and the loop would spin. Implemented else branch: join R_i with a child
+  and keep the dropped variables some remaining neighbour still needs (`generalMerges` counter);
+  correct always, output-bounded never — it is exactly the non-free-connex case. The free-connex
+  invariant (else never taken, because the remaining tree is Tn whose adjacent nodes share only
+  output variables, so D = ∅) is asserted by `setInvariantChecks(true)` and counted otherwise;
+  `evaluate(Classification)` passes `expectReducible = (kind == FREE_CONNEX)`. Tests:
+  `RelationTest` (semiring rules, π/⋈ commutation on the bag), `YannakakisPlusEvaluatorTest`
+  (bag-exact oracle = π_O of the classical evaluator; hidden-centre star reaches exactly one
+  general merge and throws when declared free-connex with checks on; fan-out path keeps
+  {a=1,d=4}×2; corpus and 200 random rounds with checks on, `generalMerges == 0` on every
+  free-connex BGP), `OutputVariableSafetyTest` runs the 62-query corpus plus the DISTINCT variant
+  of every non-DISTINCT query (`Query.setDistinct(true)`, 59 more) end to end through the executor
+  against stock ARQ, bag-exact (sorted row lists keep duplicates), and asserts `collapsedBgps()`
+  ≥ 20 on the DISTINCT variants but ≤ 5 without DISTINCT and strictly fewer than the invocations
+  (GROUP BY / LIMIT / BIND below the DISTINCT keep their counts). `mvn test`: 302/302 green.
+- Step 10, docs follow-up: CLAUDE.md's pipeline/integration/testing sections and the bag-semantics
+  hard rule rewritten for the current tree (classifier, Plus evaluator, counting semiring, single
+  DISTINCT entry point, `OpReduced` not a DISTINCT); the Jena API list gained the methods verified
+  today (`Query.setDistinct`, `OpWalker`/`OpVisitorBase`, `Var.getVarName`).
+  `docs/implementation-inventory.md` rewritten as a step-10 snapshot: classes table, data flow
+  citing methods instead of line numbers (the old ones went stale within a day), and the
+  deviations list — set-semantics entry replaced by the two Algorithm 2 deviations (two-sided
+  reducibility, general merge), the O over-approximation and the `OpReduced` decision; the
+  "no join-tree caching" and `naiveFold` entries dropped because neither exists any more.
