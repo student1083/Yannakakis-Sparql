@@ -254,29 +254,30 @@ class YannakakisOpExecutorTest {
         // correctness is unaffected by the cache
         assertEquals(run(mThree, q), runWithYannakakis(mThree, q));
 
-        GyoReduction.resetDecomposeCallCount();
+        GyoReduction.resetGyoRunCount();
         runWithYannakakis(mOne, q);
-        int callsForOneBinding = GyoReduction.decomposeCallCount();
+        int runsForOneBinding = GyoReduction.gyoRunCount();
 
-        GyoReduction.resetDecomposeCallCount();
+        GyoReduction.resetGyoRunCount();
         runWithYannakakis(mThree, q);
-        int callsForThreeBindings = GyoReduction.decomposeCallCount();
+        int runsForThreeBindings = GyoReduction.gyoRunCount();
 
         // mThree feeds 2 more rows through the pipeline than mOne. Each extra row
         // forces the OPTIONAL body (?p ex:nick ?nick) through a brand-new
         // OpExecutor/Stage -- ARQ's own "index join" (QueryIterOptionalIndex) does
-        // this per row, costing exactly 2 decompose() calls per extra row (the
-        // acyclicity pre-check plus that fresh Stage's one-shot decomposition);
-        // no per-Stage cache can remove that, since there is no Stage to reuse.
-        // The trailing "?p ex:knows ?f" BGP, however, is one Stage that receives
-        // all rows from the OPTIONAL's output via ONE execute() call: if its
-        // decompose() were (incorrectly) re-run per binding instead of cached by
-        // shape, each extra row would cost one MORE call on top of that (3 total),
-        // i.e. growth would be 6, not 4.
+        // this per row, costing exactly 2 GYO runs per extra row (the acyclicity
+        // pre-check plus that fresh Stage's one-shot classification of the
+        // single-edge, hence relation-dominated, bound pattern); no per-Stage cache
+        // can remove that, since there is no Stage to reuse. The trailing
+        // "?p ex:knows ?f" BGP, however, is one Stage that receives all rows from
+        // the OPTIONAL's output via ONE execute() call: if its classification were
+        // (incorrectly) re-run per binding instead of cached by shape, each extra
+        // row would cost one MORE run on top of that (3 total), i.e. growth would
+        // be 6, not 4.
         int extraRows = 2;
-        int growth = callsForThreeBindings - callsForOneBinding;
+        int growth = runsForThreeBindings - runsForOneBinding;
         assertEquals(2 * extraRows, growth,
-                "decompose() must be cached per binding shape inside a Stage, "
+                "the classification must be cached per binding shape inside a Stage, "
                         + "not re-run once per incoming binding");
     }
 }

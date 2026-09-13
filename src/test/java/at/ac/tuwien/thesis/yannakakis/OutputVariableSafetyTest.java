@@ -29,9 +29,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Phase D safety net. Every query in {@link #CORPUS} is run twice against the same
  * dataset — once on stock ARQ, once with {@link YannakakisOpExecutor} registered — and the
  * results must be equal under canonical comparison (variables sorted alphabetically within
- * each row, then rows sorted; never {@code QuerySolution.toString()}). Where the query itself
- * is order-sensitive (ORDER BY) the ordered row lists are compared; where only a bare LIMIT
- * makes the chosen rows arbitrary, the row count is compared.
+ * each row, then rows sorted; never {@code QuerySolution.toString()}). The comparison is
+ * <em>bag-exact</em>: the sorted row lists keep every duplicate, so multiplicities must
+ * match, not just the set of rows. Where the query itself is order-sensitive (ORDER BY) the
+ * ordered row lists are compared; where only a bare LIMIT makes the chosen rows arbitrary,
+ * the row count is compared.
+ *
+ * <p>Every query that is not already {@code DISTINCT} is run a second time as its
+ * {@code SELECT DISTINCT} variant ({@link #variants}), so the executor's final
+ * multiplicity collapse is exercised against stock ARQ alongside the bag-preserving path.
  *
  * <p>The corpus is the union of every query in the existing test classes
  * ({@code DifferentialTest}, {@code YannakakisOpExecutorTest}, {@code EngineComparisonTest},
@@ -232,7 +238,19 @@ class OutputVariableSafetyTest {
 
     // ---- tests -----------------------------------------------------------------
 
-    static Stream<Case> corpus() { return CORPUS.stream(); }
+    /** The corpus, then the DISTINCT variant of every case that is not DISTINCT already. */
+    static List<Case> variants() {
+        List<Case> all = new ArrayList<>(CORPUS);
+        for (Case c : CORPUS) {
+            Query q = QueryFactory.create(c.sparql());
+            if (q.isDistinct()) continue;
+            q.setDistinct(true);
+            all.add(new Case(c.name() + "-distinct", q.toString(), c.mode(), c.expectRows()));
+        }
+        return all;
+    }
+
+    static Stream<Case> corpus() { return variants().stream(); }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("corpus")
@@ -270,5 +288,16 @@ class OutputVariableSafetyTest {
                 "expected the Yannakakis path to fire for most of the corpus, fired " + YannakakisOpExecutor.invocations());
         assertTrue(YannakakisOpExecutor.narrowedBgps() >= 10,
                 "expected the analyzer to narrow O for many corpus queries, narrowed " + YannakakisOpExecutor.narrowedBgps());
+        // Without DISTINCT only existence-only operands (MINUS right sides) may collapse counts.
+        int collapsedPlain = YannakakisOpExecutor.collapsedBgps();
+        assertTrue(collapsedPlain <= 5, "unexpectedly many collapsible BGPs without DISTINCT: " + collapsedPlain);
+
+        YannakakisOpExecutor.resetCounter();
+        List<Case> distinct = variants().subList(CORPUS.size(), variants().size());
+        for (Case c : distinct) withYannakakis(ds, c.sparql());
+        assertTrue(YannakakisOpExecutor.collapsedBgps() >= 20,
+                "expected the DISTINCT variants to collapse counts for many BGPs, collapsed " + YannakakisOpExecutor.collapsedBgps());
+        assertTrue(YannakakisOpExecutor.collapsedBgps() < YannakakisOpExecutor.invocations(),
+                "GROUP BY / LIMIT / BIND below the DISTINCT must keep their multiplicities");
     }
 }

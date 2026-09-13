@@ -141,8 +141,20 @@ public final class AlgebraContextAnalyzer {
         PROCEDURE
     }
 
-    /** A BGP's computed output variables, plus the fallback reason if it was not computed. */
-    public record Entry(Set<Var> outputVars, Optional<FallbackReason> fallbackReason) {
+    /**
+     * A BGP's computed output variables, plus the fallback reason if it was not computed,
+     * plus whether the BGP's row multiplicities are irrelevant to the query result.
+     *
+     * <p>{@code countsCollapsible} is true iff an {@link OpDistinct} lies above the BGP with
+     * no multiplicity-sensitive operator in between — {@link OpGroup} (aggregates count
+     * duplicates), {@link OpSlice}/{@link OpTopN} (a LIMIT over duplicates), {@link OpExtend}/
+     * {@link OpAssign}/{@link OpUnfold} (a non-deterministic expression such as {@code RAND()}
+     * would give duplicates different values), and the fallback operators — or iff the BGP is
+     * the right operand of MINUS / a semijoin / an anti-join, where only existence matters.
+     * A collapsible BGP may report each distinct row once; the algorithms never branch on
+     * this, only the final emission does.
+     */
+    public record Entry(Set<Var> outputVars, Optional<FallbackReason> fallbackReason, boolean countsCollapsible) {
         public Entry {
             outputVars = Collections.unmodifiableSet(new LinkedHashSet<>(outputVars));
             Objects.requireNonNull(fallbackReason);
@@ -182,6 +194,12 @@ public final class AlgebraContextAnalyzer {
             return all;
         }
 
+        /** Whether {@code bgp} may collapse multiplicities; false if it was never analysed. */
+        public boolean countsCollapsible(OpBGP bgp) {
+            Entry e = entries.get(bgp);
+            return e != null && e.countsCollapsible();
+        }
+
         /** Number of analysed BGP nodes. */
         public int size() { return entries.size(); }
 
@@ -193,11 +211,12 @@ public final class AlgebraContextAnalyzer {
         /** Number of {@link #outputVarsOrAll} calls that hit a BGP outside the analysed tree. */
         public int unanalysedLookups() { return unanalysedLookups; }
 
-        private void record(OpBGP bgp, Set<Var> outputVars, Optional<FallbackReason> reason) {
+        private void record(OpBGP bgp, Set<Var> outputVars, Optional<FallbackReason> reason, boolean collapsible) {
             Entry previous = entries.get(bgp);
             if (previous != null) {
                 // The same OpBGP object reachable twice (shared subtree): keep the union of
-                // both demands, and a fallback wins over a computed set. Never narrower.
+                // both demands, a fallback wins over a computed set, and counts may only be
+                // collapsed if both occurrences allow it. Never narrower, never bolder.
                 Set<Var> merged = new LinkedHashSet<>(previous.outputVars());
                 merged.addAll(outputVars);
                 Optional<FallbackReason> mergedReason = previous.fallbackReason().isPresent()
@@ -205,11 +224,11 @@ public final class AlgebraContextAnalyzer {
                 if (mergedReason.isPresent() && previous.fallbackReason().isEmpty()) {
                     reasonCounts.merge(mergedReason.get(), 1, Integer::sum);
                 }
-                entries.put(bgp, new Entry(merged, mergedReason));
+                entries.put(bgp, new Entry(merged, mergedReason, previous.countsCollapsible() && collapsible));
                 return;
             }
             reason.ifPresent(r -> reasonCounts.merge(r, 1, Integer::sum));
-            entries.put(bgp, new Entry(outputVars, reason));
+            entries.put(bgp, new Entry(outputVars, reason, collapsible));
         }
     }
 
@@ -221,7 +240,7 @@ public final class AlgebraContextAnalyzer {
         Analysis analysis = new Analysis();
         // No projection above the root: everything the tree mentions is demanded.
         Set<Var> rootDemand = new LinkedHashSet<>(OpVars.mentionedVars(root));
-        walk(root, rootDemand, Optional.empty(), analysis);
+        walk(root, rootDemand, Optional.empty(), false, analysis);
         return analysis;
     }
 
@@ -260,6 +279,15 @@ public final class AlgebraContextAnalyzer {
                 .orElseGet(() -> varsOf(bgp.getPattern()));
     }
 
+    /**
+     * Convenience for executors: whether {@code bgp} may collapse its multiplicities.
+     * False when there is no table or the BGP is not in it — the safe default keeps
+     * every duplicate.
+     */
+    public static boolean countsCollapsible(ExecutionContext execCxt, OpBGP bgp) {
+        return lookup(execCxt).map(a -> a.countsCollapsible(bgp)).orElse(false);
+    }
+
     /** All variables of a basic pattern, in first-occurrence order. */
     public static Set<Var> varsOf(BasicPattern pattern) {
         Set<Var> vars = new LinkedHashSet<>();
@@ -273,9 +301,10 @@ public final class AlgebraContextAnalyzer {
 
     // ---- the walk ----------------------------------------------------------
 
-    private static void walk(Op op, Set<Var> demand, Optional<FallbackReason> fallback, Analysis analysis) {
+    private static void walk(Op op, Set<Var> demand, Optional<FallbackReason> fallback, boolean collapsible,
+                             Analysis analysis) {
         if (op == null) return;
-        op.visit(new Walker(demand, fallback, analysis));
+        op.visit(new Walker(demand, fallback, collapsible, analysis));
     }
 
     private static void addVar(Set<Var> acc, Node n) {
@@ -306,16 +335,23 @@ public final class AlgebraContextAnalyzer {
     private static final class Walker implements OpVisitor {
         private final Set<Var> demand;
         private final Optional<FallbackReason> fallback;
+        private final boolean collapsible;     // multiplicities below this node cannot reach the result
         private final Analysis analysis;
 
-        Walker(Set<Var> demand, Optional<FallbackReason> fallback, Analysis analysis) {
+        Walker(Set<Var> demand, Optional<FallbackReason> fallback, boolean collapsible, Analysis analysis) {
             this.demand = demand;
             this.fallback = fallback;
+            this.collapsible = collapsible;
             this.analysis = analysis;
         }
 
         private void recurse(Op child, Set<Var> childDemand) {
-            walk(child, childDemand, fallback, analysis);
+            walk(child, childDemand, fallback, collapsible, analysis);
+        }
+
+        /** Recurse with the collapsible flag set explicitly (a DISTINCT above, or a sensitive operator). */
+        private void recurse(Op child, Set<Var> childDemand, boolean childCollapsible) {
+            walk(child, childDemand, fallback, childCollapsible, analysis);
         }
 
         private void recurseFallback(Op child, FallbackReason reason, Op cause) {
@@ -325,7 +361,7 @@ public final class AlgebraContextAnalyzer {
                 LOG.debug("operator {} cannot be analysed ({}); every BGP below it keeps all variables",
                         cause.getName(), reason);
             }
-            walk(child, demand, r, analysis);
+            walk(child, demand, r, false, analysis);
         }
 
         // ---- Op0 -----------------------------------------------------------
@@ -335,13 +371,13 @@ public final class AlgebraContextAnalyzer {
             Set<Var> all = varsOf(opBGP.getPattern());
             if (fallback.isPresent()) {
                 LOG.debug("BGP {} -> all variables {} (fallback: {})", opBGP, all, fallback.get());
-                analysis.record(opBGP, all, fallback);
+                analysis.record(opBGP, all, fallback, false);
                 return;
             }
             Set<Var> out = new LinkedHashSet<>();
             for (Var v : all) if (demand.contains(v)) out.add(v);
-            LOG.debug("BGP {} -> output variables {} of {}", opBGP, out, all);
-            analysis.record(opBGP, out, Optional.empty());
+            LOG.debug("BGP {} -> output variables {} of {} (counts collapsible: {})", opBGP, out, all, collapsible);
+            analysis.record(opBGP, out, Optional.empty(), collapsible);
         }
 
         @Override public void visit(OpQuadPattern quadPattern) {}   // no OpBGP inside
@@ -387,25 +423,29 @@ public final class AlgebraContextAnalyzer {
             if (opLabel.hasSubOp()) recurse(opLabel.getSubOp(), demand);
         }
 
+        // BIND-like operators evaluate their expression once per row: a non-deterministic
+        // function (RAND, UUID, BNODE) would give two duplicate rows different values, so
+        // multiplicities below them are never collapsible.
+
         @Override
         public void visit(OpAssign opAssign) {
             Set<Var> d = new LinkedHashSet<>(demand);
             opAssign.getVarExprList().forEachExpr((v, e) -> ExprVars.varsMentioned(d, e));
-            recurse(opAssign.getSubOp(), d);
+            recurse(opAssign.getSubOp(), d, false);
         }
 
         @Override
         public void visit(OpExtend opExtend) {
             Set<Var> d = new LinkedHashSet<>(demand);
             opExtend.getVarExprList().forEachExpr((v, e) -> ExprVars.varsMentioned(d, e));
-            recurse(opExtend.getSubOp(), d);
+            recurse(opExtend.getSubOp(), d, false);
         }
 
         @Override
         public void visit(OpUnfold opUnfold) {
             Set<Var> d = new LinkedHashSet<>(demand);
             ExprVars.varsMentioned(d, opUnfold.getExpr());
-            recurse(opUnfold.getSubOp(), d);
+            recurse(opUnfold.getSubOp(), d, false);
         }
 
         // ---- Op2 -----------------------------------------------------------
@@ -416,10 +456,13 @@ public final class AlgebraContextAnalyzer {
             recurse(right, union(union(demand, mentioned(left)), extra));
         }
 
-        /** Only the left operand contributes to the output; the right is a filter on it. */
+        /**
+         * Only the left operand contributes to the output; the right is a filter on it, so
+         * only the existence of its rows matters and their multiplicities may collapse.
+         */
         private void leftOnly(Op left, Op right) {
             recurse(left, union(demand, mentioned(right)));
-            recurse(right, mentioned(left));
+            recurse(right, mentioned(left), true);
         }
 
         @Override public void visit(OpJoin opJoin)               { symmetric(opJoin.getLeft(), opJoin.getRight(), Set.of()); }
@@ -454,9 +497,12 @@ public final class AlgebraContextAnalyzer {
         // ---- modifiers -----------------------------------------------------
 
         @Override public void visit(OpList opList)         { recurse(opList.getSubOp(), demand); }
+        // REDUCED only permits dropping duplicates; stock ARQ keeps some, so we keep them all.
         @Override public void visit(OpReduced opReduced)   { recurse(opReduced.getSubOp(), demand); }
-        @Override public void visit(OpDistinct opDistinct) { recurse(opDistinct.getSubOp(), demand); }
-        @Override public void visit(OpSlice opSlice)       { recurse(opSlice.getSubOp(), demand); }
+        // DISTINCT: from here down, multiplicities cannot reach the result (until a sensitive operator).
+        @Override public void visit(OpDistinct opDistinct) { recurse(opDistinct.getSubOp(), demand, true); }
+        // A LIMIT/OFFSET over a bag counts duplicates.
+        @Override public void visit(OpSlice opSlice)       { recurse(opSlice.getSubOp(), demand, false); }
 
         @Override
         public void visit(OpOrder opOrder) {
@@ -465,7 +511,7 @@ public final class AlgebraContextAnalyzer {
 
         @Override
         public void visit(OpTopN opTop) {
-            recurse(opTop.getSubOp(), union(demand, ExprVars.getVarsMentioned(opTop.getConditions())));
+            recurse(opTop.getSubOp(), union(demand, ExprVars.getVarsMentioned(opTop.getConditions())), false);
         }
 
         @Override
@@ -486,7 +532,7 @@ public final class AlgebraContextAnalyzer {
             for (ExprAggregator agg : opGroup.getAggregators()) {
                 d.addAll(exprVars(agg.getAggregator().getExprList()));   // null for COUNT(*)
             }
-            recurse(opGroup.getSubOp(), d);
+            recurse(opGroup.getSubOp(), d, false);              // aggregates count duplicates
         }
     }
 }

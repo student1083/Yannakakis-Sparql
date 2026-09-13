@@ -2,6 +2,7 @@ package at.ac.tuwien.thesis.yannakakis;
 
 import at.ac.tuwien.thesis.yannakakis.QueryClassifier.Classification;
 import at.ac.tuwien.thesis.yannakakis.QueryClassifier.Kind;
+import at.ac.tuwien.thesis.yannakakis.YannakakisPlusEvaluator.Answer;
 import at.ac.tuwien.thesis.yannakakis.YannakakisPlusEvaluator.Reduced;
 import org.apache.jena.graph.Graph;
 import org.apache.jena.graph.Node;
@@ -16,6 +17,8 @@ import org.apache.jena.sparql.algebra.op.OpBGP;
 import org.apache.jena.sparql.core.BasicPattern;
 import org.apache.jena.sparql.core.Var;
 import org.apache.jena.util.iterator.ExtendedIterator;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,18 +43,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link YannakakisPlusEvaluator} against the classical three-pass {@link YannakakisEvaluator}
- * as oracle: for the same join tree and relations, π_O of the classical full join must equal
- * what the first round (plus the join of what remains) produces. On top of that the
- * relation-dominated claim of Chapter 3 (Theorem 3.11) is asserted wherever it applies:
- * exactly one node remains and zero semijoins were performed.
+ * as oracle: for the same join tree and relations, π_O of the classical full join (a bag:
+ * projection sums multiplicities) must equal what the two rounds produce, multiplicities
+ * included. On top of that the relation-dominated claim of Chapter 3 (Theorem 3.11) is
+ * asserted wherever it applies — exactly one node remains and zero semijoins were performed —
+ * and the free-connex claim of Algorithm 2: the general-merge branch is never reached.
  *
  * <p>The corpus of {@link OutputVariableSafetyTest} is reused at the BGP level: each query is
  * compiled, O per BGP comes from {@link AlgebraContextAnalyzer} exactly as in the executor,
  * the BGP's relations are matched against the corpus graph, and both evaluators run on the
- * classified tree. The executor itself still uses the classical evaluator, because projecting
- * onto O early collapses duplicates that non-DISTINCT queries must keep (step 10).
+ * classified tree. (The end-to-end run of the same corpus through the executor, against stock
+ * ARQ, is {@link OutputVariableSafetyTest} itself.)
  */
 class YannakakisPlusEvaluatorTest {
+
+    @BeforeEach
+    void enableInvariantChecks() { YannakakisPlusEvaluator.setInvariantChecks(true); }
+
+    @AfterEach
+    void disableInvariantChecks() { YannakakisPlusEvaluator.setInvariantChecks(false); }
 
     private static Node node(String token) {
         if (token.startsWith("?")) return Var.alloc(token.substring(1));
@@ -96,10 +106,14 @@ class YannakakisPlusEvaluatorTest {
         assertEquals(0, red.semijoins(), "relation-dominated queries need no semijoin: " + ctx);
         assertEquals(cl.joinTree().size() - 1, red.absorptions(), "every other node is absorbed: " + ctx);
         assertEquals(oracle(cl, rels), red.singleNodeAnswer(), ctx);
-        assertEquals(oracle(cl, rels), YannakakisPlusEvaluator.evaluateRelationDominated(cl.joinTree(), cl.outputVars(), rels), ctx);
+        assertEquals(oracle(cl, rels), YannakakisPlusEvaluator.evaluateRelationDominated(cl.joinTree(), cl.outputVars(), rels).relation(), ctx);
     }
 
-    /** What every first round must satisfy, whatever the class. */
+    /**
+     * What every evaluation must satisfy, whatever the class: the first round's structural
+     * invariants, then both rounds (invariant checks on) equal to the oracle bag, with the
+     * general-merge branch untouched unless the query is general acyclic.
+     */
     private static Reduced checkedFirstRound(Classification cl, Map<Integer, Relation> rels, String ctx) {
         Reduced red = YannakakisPlusEvaluator.firstRound(cl.joinTree(), cl.outputVars(), rels);
         assertTrue(red.tree().size() >= 1 && red.tree().size() <= cl.joinTree().size(), ctx);
@@ -115,8 +129,12 @@ class YannakakisPlusEvaluatorTest {
             }
         }
         Relation expected = oracle(cl, rels);
-        assertEquals(expected, red.answer(), "first round + join differs from the classical evaluator: " + ctx);
-        assertEquals(expected, YannakakisPlusEvaluator.evaluate(cl, rels), ctx);
+        boolean reducibleOnly = cl.kind() != Kind.ACYCLIC;
+        Answer answer = YannakakisPlusEvaluator.secondRound(red, reducibleOnly);
+        assertEquals(expected, answer.relation(), "two rounds differ from the classical evaluator: " + ctx);
+        assertEquals(red.tree().size() - 1, answer.merges() + answer.generalMerges(), "one merge per remaining non-root node: " + ctx);
+        if (reducibleOnly) assertEquals(0, answer.generalMerges(), "free-connex: the else branch is never taken: " + ctx);
+        assertEquals(expected, YannakakisPlusEvaluator.evaluate(cl, rels).relation(), ctx);
         if (cl.kind() == Kind.RELATION_DOMINATED) assertTheorem311(cl, red, rels, ctx);
         return red;
     }
@@ -152,7 +170,8 @@ class YannakakisPlusEvaluatorTest {
             Map<Integer, Relation> rels = byId(pathRelations());
             Reduced red = checkedFirstRound(cl, rels, "path O={b,c}");
             assertTheorem311(cl, red, rels, "path O={b,c}");
-            assertEquals(Relation.builder("b", "c").row("2", "3").build(), red.singleNodeAnswer());
+            // two full rows (1-2-3-4 and 5-2-3-4) project onto the same {b=2,c=3}: multiplicity 2
+            assertEquals(Relation.builder("b", "c").rowTimes(2, "2", "3").build(), red.singleNodeAnswer());
         }
 
         @Test
@@ -161,7 +180,7 @@ class YannakakisPlusEvaluatorTest {
             Map<Integer, Relation> rels = byId(pathRelations());
             Reduced red = checkedFirstRound(cl, rels, "path O={c}");
             assertTheorem311(cl, red, rels, "path O={c}");
-            assertEquals(Relation.builder("c").row("3").build(), red.singleNodeAnswer());
+            assertEquals(Relation.builder("c").rowTimes(2, "3").build(), red.singleNodeAnswer());
         }
 
         @Test
@@ -174,14 +193,18 @@ class YannakakisPlusEvaluatorTest {
             Classification cl = classify(hg(star), vars("x"), Kind.RELATION_DOMINATED);
             Reduced red = checkedFirstRound(cl, rels, "star O={x}");
             assertTheorem311(cl, red, rels, "star O={x}");
-            assertEquals(Relation.builder("x").row("u").build(), red.singleNodeAnswer());
+            // u-a1-b1-c1 and u-a1-b1-c3: x=u twice
+            assertEquals(Relation.builder("x").rowTimes(2, "u").build(), red.singleNodeAnswer());
         }
 
         @Test
         void emptyOutputIsDominatedAndYieldsUnitOrEmpty() {
             Classification cl = classify(hg(PATH), Set.of(), Kind.RELATION_DOMINATED);
             Reduced red = checkedFirstRound(cl, byId(pathRelations()), "path O={}");
-            assertEquals(Relation.unit(), red.singleNodeAnswer());
+            // π_∅ of the two full rows: the empty tuple with multiplicity 2
+            assertEquals(1, red.singleNodeAnswer().rowCount());
+            assertEquals(2, red.singleNodeAnswer().bagSize());
+            assertEquals(Relation.unit(), red.singleNodeAnswer().distinct());
 
             List<Relation> dead = new ArrayList<>(pathRelations());
             dead.set(1, Relation.builder("b", "c").build());                    // no rows: nothing joins
@@ -226,7 +249,11 @@ class YannakakisPlusEvaluatorTest {
             assertEquals(3, red.tree().size());
             assertEquals(2, red.semijoins());
             assertEquals(0, red.absorptions());
-            assertEquals(Relation.builder("a", "d").row("1", "4").row("5", "4").build(), red.answer());
+            // the hidden b and c are dropped one merge at a time; no general merge is needed
+            Answer answer = YannakakisPlusEvaluator.secondRound(red, true);
+            assertEquals(Relation.builder("a", "d").row("1", "4").row("5", "4").build(), answer.relation());
+            assertEquals(2, answer.merges());
+            assertEquals(0, answer.generalMerges());
             assertThrows(IllegalStateException.class, red::singleNodeAnswer);
         }
 
@@ -237,7 +264,7 @@ class YannakakisPlusEvaluatorTest {
             Reduced red = checkedFirstRound(cl, rels, "path O=all");
             assertEquals(3, red.tree().size());
             assertEquals(2, red.semijoins());
-            assertEquals(YannakakisEvaluator.evaluate(cl.joinTree(), rels), red.answer());
+            assertEquals(YannakakisEvaluator.evaluate(cl.joinTree(), rels), YannakakisPlusEvaluator.secondRound(red, true).relation());
         }
 
         @Test
@@ -245,7 +272,8 @@ class YannakakisPlusEvaluatorTest {
             // O = {a,c}: the leaf R0 keeps a (output) and b (join variable); R2 is absorbed into R1.
             Classification cl = classify(hg(PATH), vars("a", "c"), Kind.ACYCLIC);
             Reduced red = checkedFirstRound(cl, byId(pathRelations()), "path O={a,c}");
-            assertEquals(Relation.builder("a", "c").row("1", "3").row("5", "3").build(), red.answer());
+            assertEquals(Relation.builder("a", "c").row("1", "3").row("5", "3").build(),
+                    YannakakisPlusEvaluator.secondRound(red, false).relation());
             for (JoinTree.Node n : red.tree().nodes()) {
                 Set<Var> schema = red.relation(n).schema();
                 assertFalse(schema.contains(Var.alloc("d")), "d is neither output nor a join variable of a remaining node");
@@ -257,7 +285,48 @@ class YannakakisPlusEvaluatorTest {
             Reduced red = YannakakisPlusEvaluator.firstRound(JoinTree.empty(), vars("x"), Map.of());
             assertEquals(0, red.tree().size());
             assertEquals(0, red.semijoins());
-            assertEquals(Relation.unit(), red.answer());
+            assertEquals(Relation.unit(), YannakakisPlusEvaluator.secondRound(red, true).relation());
+        }
+
+        @Test
+        void hiddenStarCentreNeedsTheGeneralMerge() {
+            // O = all leaves, centre x hidden: not free-connex. No merge can drop x while another
+            // arm still joins on it, so the else branch is the only way to finish.
+            List<Triple> star = List.of(t("?x", "p1", "?a"), t("?x", "p2", "?b"), t("?x", "p3", "?c"));
+            Map<Integer, Relation> rels = byId(List.of(
+                    Relation.builder("x", "a").row("u", "a1").row("u", "a2").row("v", "a3").build(),
+                    Relation.builder("x", "b").row("u", "b1").row("v", "b2").row("w", "b3").build(),
+                    Relation.builder("x", "c").row("u", "c1").row("v", "c2").row("v", "c3").build()));
+            Classification cl = classify(hg(star), vars("a", "b", "c"), Kind.ACYCLIC);
+            Reduced red = checkedFirstRound(cl, rels, "star O={a,b,c}");
+            assertEquals(3, red.tree().size());
+
+            Answer answer = YannakakisPlusEvaluator.secondRound(red, false);
+            assertEquals(oracle(cl, rels), answer.relation());
+            assertEquals(4, answer.relation().bagSize(), "u: 2×1×1, v: 1×1×2");
+            assertEquals(2, answer.merges() + answer.generalMerges());
+            assertEquals(1, answer.generalMerges(), "the first merge must keep x for the third arm; the last one may drop it");
+
+            // Declaring it free-connex is caught when the invariant checks are on ...
+            assertTrue(YannakakisPlusEvaluator.invariantChecks());
+            assertThrows(IllegalStateException.class, () -> YannakakisPlusEvaluator.secondRound(red, true));
+            // ... and silently tolerated (same answer) when they are off, as in a benchmark.
+            YannakakisPlusEvaluator.setInvariantChecks(false);
+            assertEquals(answer.relation(), YannakakisPlusEvaluator.secondRound(red, true).relation());
+        }
+
+        @Test
+        void multiplicitiesSurviveTheSecondRound() {
+            // path a-b-c-d, O = {a,d}, with fan-out in the hidden middle: a=1 reaches d=4 by two
+            // different (b,c) routes, so the bag has {a=1,d=4} twice.
+            Map<Integer, Relation> rels = byId(List.of(
+                    Relation.builder("a", "b").row("1", "2").row("1", "9").build(),
+                    Relation.builder("b", "c").row("2", "3").row("9", "3").build(),
+                    Relation.builder("c", "d").row("3", "4").build()));
+            Classification cl = classify(hg(PATH), vars("a", "d"), Kind.ACYCLIC);
+            checkedFirstRound(cl, rels, "path O={a,d} fan-out");
+            assertEquals(Relation.builder("a", "d").rowTimes(2, "1", "4").build(),
+                    YannakakisPlusEvaluator.evaluate(cl, rels).relation());
         }
     }
 
@@ -328,6 +397,25 @@ class YannakakisPlusEvaluatorTest {
         assertTrue(dominated >= 10, "expected many relation-dominated corpus BGPs, got " + dominated);
         assertTrue(freeConnex >= 10, "expected many free-connex corpus BGPs, got " + freeConnex);
         assertTrue(general >= 1, "expected at least one general acyclic corpus BGP, got " + general);
+    }
+
+    @Test
+    void freeConnexCorpusBgpsNeverReachTheElseBranch() {
+        // With the invariant checks on, reaching the general merge on a free-connex query throws;
+        // additionally the counter must read zero. Relation-dominated BGPs never enter round two.
+        Graph g = OutputVariableSafetyTest.corpusModel().getGraph();
+        int checked = 0;
+        for (OutputVariableSafetyTest.Case c : OutputVariableSafetyTest.CORPUS) {
+            for (CorpusBgp cb : corpusBgps(c, g)) {
+                if (cb.cl().kind() != Kind.FREE_CONNEX) continue;
+                Reduced red = YannakakisPlusEvaluator.firstRound(cb.cl().joinTree(), cb.cl().outputVars(), cb.rels());
+                Answer answer = YannakakisPlusEvaluator.secondRound(red, true);
+                assertEquals(0, answer.generalMerges(), c.name() + " " + cb.bgp());
+                assertEquals(red.tree().size() - 1, answer.merges(), c.name() + " " + cb.bgp());
+                checked++;
+            }
+        }
+        assertTrue(checked >= 10, "expected many free-connex corpus BGPs, checked " + checked);
     }
 
     /** Same matching as the executor's private helper: variables bind, repeated variables must agree. */

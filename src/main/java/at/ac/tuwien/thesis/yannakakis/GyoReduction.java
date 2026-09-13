@@ -28,16 +28,19 @@ public final class GyoReduction {
 
     private GyoReduction() {}
 
-    private static final AtomicInteger DECOMPOSE_CALLS = new AtomicInteger();
+    private static final AtomicInteger GYO_RUNS = new AtomicInteger();
 
-    /** Test-only instrumentation: number of times {@link #decompose} has run. */
-    public static int decomposeCallCount() { return DECOMPOSE_CALLS.get(); }
+    /**
+     * Test-only instrumentation: number of ear-removal runs ({@link #reduce}), which
+     * every entry point — {@link #decompose}, {@link #isAcyclic}, and
+     * {@link QueryClassifier#classify} — goes through.
+     */
+    public static int gyoRunCount() { return GYO_RUNS.get(); }
 
-    public static void resetDecomposeCallCount() { DECOMPOSE_CALLS.set(0); }
+    public static void resetGyoRunCount() { GYO_RUNS.set(0); }
 
     /** @return the join tree if alpha-acyclic, empty if cyclic. */
     public static Optional<JoinTree> decompose(QueryHypergraph h) {
-        DECOMPOSE_CALLS.incrementAndGet();
         if (h.edges().isEmpty()) {                          // empty BGP
             return Optional.of(JoinTree.empty());
         }
@@ -70,6 +73,7 @@ public final class GyoReduction {
      */
     static Optional<Decomposition> reduce(Map<Integer, Set<Var>> edges) {
         if (edges.isEmpty()) throw new IllegalArgumentException("reduce needs at least one edge");
+        GYO_RUNS.incrementAndGet();
         Map<Integer, Set<Var>> edgeVars = new LinkedHashMap<>(edges);
         Map<Integer, Integer> parentOf = new HashMap<>();   // child id -> parent id
         List<Integer> remaining = new ArrayList<>(edgeVars.keySet());

@@ -35,8 +35,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Custom ARQ physical executor. Intercepts BGP evaluation: alpha-acyclic BGPs
- * are evaluated with the standalone Yannakakis evaluator; cyclic BGPs (and the
- * no-active-graph case) fall through to stock ARQ unchanged.
+ * are evaluated with the output-sensitive {@link YannakakisPlusEvaluator}; cyclic
+ * BGPs (and the no-active-graph case) fall through to stock ARQ unchanged.
  *
  * <p>On the first {@link #exec} call of a query execution (which receives the root
  * of the plan) the {@link AlgebraContextAnalyzer} is run once over the whole tree
@@ -44,8 +44,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * then looks up its output variables O by object identity; a BGP the analyzer
  * never saw (ARQ manufactures fresh {@code OpBGP} objects for quad patterns and
  * for the substituted right side of an index join) gets all of its variables.
- * O is currently only computed, restricted per incoming binding and logged — it
- * does not change what the executor returns yet; later steps consume it.
+ * The BGP is classified against O ({@link QueryClassifier}), evaluated to π_O
+ * with multiplicities, and each result row is emitted as many times as its
+ * multiplicity — or once, when the analyzer found the BGP's counts collapsible
+ * (a DISTINCT above with nothing multiplicity-sensitive in between).
  */
 public class YannakakisOpExecutor extends OpExecutor {
 
@@ -56,6 +58,7 @@ public class YannakakisOpExecutor extends OpExecutor {
     private static final AtomicInteger COUNTER = new AtomicInteger();
     private static final AtomicInteger ANALYSES = new AtomicInteger();
     private static final AtomicInteger NARROWED = new AtomicInteger();
+    private static final AtomicInteger COLLAPSED = new AtomicInteger();
     private static OpExecutorFactory previous;
 
     public YannakakisOpExecutor(ExecutionContext execCxt) {
@@ -110,8 +113,10 @@ public class YannakakisOpExecutor extends OpExecutor {
         if (!outputVars.containsAll(AlgebraContextAnalyzer.varsOf(pattern))) {
             NARROWED.incrementAndGet();
         }
-        LOG.debug("BGP {} output variables O = {}", pattern, outputVars);
-        return new Stage(pattern, outputVars, input, execCxt);
+        boolean collapsible = AlgebraContextAnalyzer.countsCollapsible(execCxt, opBGP);
+        if (collapsible) COLLAPSED.incrementAndGet();
+        LOG.debug("BGP {} output variables O = {}, counts collapsible = {}", pattern, outputVars, collapsible);
+        return new Stage(pattern, outputVars, collapsible, input, execCxt);
     }
 
     // ---- registration ---------------------------------------------------
@@ -135,26 +140,29 @@ public class YannakakisOpExecutor extends OpExecutor {
      * per-binding restriction) was a strict subset of their variables.
      */
     public static int narrowedBgps() { return NARROWED.get(); }
+    /** Number of intercepted BGPs whose multiplicities were collapsed to 1 (DISTINCT above). */
+    public static int collapsedBgps() { return COLLAPSED.get(); }
     public static void resetCounter() {
         COUNTER.set(0);
         ANALYSES.set(0);
         NARROWED.set(0);
+        COLLAPSED.set(0);
     }
 
     // ---- per-input-binding evaluation -----------------------------------
 
-    /** Per binding-shape plan: the join tree and O restricted to the still-free variables. */
-    private record ShapePlan(Optional<JoinTree> joinTree, Set<Var> outputVars) {}
-
     private static final class Stage extends QueryIterRepeatApply {
         private final BasicPattern pattern;
         private final Set<Var> outputVars;
-        private final Map<Object, ShapePlan> planCache = new HashMap<>();
+        private final boolean collapsible;
+        /** Per binding shape: the classification (rooted join tree + O restricted to the free variables). */
+        private final Map<Object, Optional<QueryClassifier.Classification>> planCache = new HashMap<>();
 
-        Stage(BasicPattern pattern, Set<Var> outputVars, QueryIterator input, ExecutionContext execCxt) {
+        Stage(BasicPattern pattern, Set<Var> outputVars, boolean collapsible, QueryIterator input, ExecutionContext execCxt) {
             super(input, execCxt);
             this.pattern = pattern;
             this.outputVars = outputVars;
+            this.collapsible = collapsible;
         }
 
         @Override
@@ -163,24 +171,21 @@ public class YannakakisOpExecutor extends OpExecutor {
             BasicPattern bound = new BasicPattern();
             for (Triple t : pattern) bound.add(substitute(t, binding));
 
-            // 2. build hypergraph + join tree of the (substituted) BGP, and restrict O
-            // to the variables still free after substitution (a variable the incoming
-            // binding already bound is a constant in `bound` and is carried by the
-            // parent binding, not produced here). Both depend only on the BGP's shape
-            // (which positions are variables and which variables they are), not on
-            // the concrete bound node values, so they are cached per shape for the
-            // lifetime of this Stage.
-            ShapePlan plan = planCache.computeIfAbsent(shapeKey(bound), k -> {
+            // 2. classify the (substituted) BGP against O restricted to the variables
+            // still free after substitution (a variable the incoming binding already
+            // bound is a constant in `bound` and is carried by the parent binding, not
+            // produced here). The classification — kind, rooted join tree, effective O —
+            // depends only on the BGP's shape (which positions are variables and which
+            // variables they are), not on the concrete bound node values, so it is
+            // cached per shape for the lifetime of this Stage.
+            Optional<QueryClassifier.Classification> plan = planCache.computeIfAbsent(shapeKey(bound), k -> {
                 Set<Var> free = AlgebraContextAnalyzer.varsOf(bound);
                 Set<Var> restricted = new LinkedHashSet<>();
                 for (Var v : outputVars) if (free.contains(v)) restricted.add(v);
                 LOG.debug("BGP {} under binding {}: O restricted to free variables = {}",
                         bound, binding, restricted);
-                return new ShapePlan(GyoReduction.decompose(QueryHypergraph.fromBasicPattern(bound)), restricted);
+                return QueryClassifier.classify(QueryHypergraph.fromBasicPattern(bound), restricted);
             });
-            Optional<JoinTree> jt = plan.joinTree();
-            // plan.outputVars() is computed and logged but NOT yet used to change the
-            // result below; later steps consume it.
 
             // 3. materialize each pattern against the live graph
             Graph graph = getExecContext().getActiveGraph();
@@ -188,26 +193,29 @@ public class YannakakisOpExecutor extends OpExecutor {
             int id = 0;
             for (Triple t : bound) rels.put(id++, matchTriple(graph, t));
 
-            // 4. evaluate via Yannakakis; jt is never empty here. Lemma: binding
+            // 4. evaluate via Yannakakis+; plan is never empty here. Lemma: binding
             // variables to constants only deletes vertices from the query
             // hypergraph and never adds any, so if the unsubstituted pattern
             // (checked acyclic in execute() above) has a join tree, that same
             // tree's running-intersection property survives for every vertex
-            // remaining after substitution. Hence GyoReduction.decompose on the
-            // substituted pattern always returns a non-empty Optional; see
+            // remaining after substitution. Hence classify on the substituted
+            // pattern always returns a non-empty Optional; see
             // GyoReductionTest#acyclicityPreservedUnderBinding.
-            Relation result = jt.map(tree -> YannakakisEvaluator.evaluate(tree, rels))
+            Relation result = plan.map(cl -> YannakakisPlusEvaluator.evaluate(cl, rels).relation())
                     .orElseThrow(() -> new IllegalStateException(
                             "unreachable: binding variables to constants only deletes hypergraph "
                                     + "vertices, never adds any, so an acyclic BGP's join tree survives "
                                     + "substitution intact (see GyoReductionTest#acyclicityPreservedUnderBinding)"));
+            // The only place DISTINCT enters: collapse the multiplicities at the very end.
+            if (collapsible) result = result.distinct();
 
-            // 5. extend the input binding with each result row
-            List<Binding> out = new ArrayList<>(result.rowCount());
-            for (Map<Var, Node> row : result.rows()) {
+            // 5. extend the input binding with each result row, once per multiplicity
+            List<Binding> out = new ArrayList<>((int) Math.min(result.bagSize(), Integer.MAX_VALUE));
+            for (Map.Entry<Map<Var, Node>, Integer> row : result.counts().entrySet()) {
                 BindingBuilder bb = BindingFactory.builder(binding);
-                for (Map.Entry<Var, Node> e : row.entrySet()) bb.add(e.getKey(), e.getValue());
-                out.add(bb.build());
+                for (Map.Entry<Var, Node> e : row.getKey().entrySet()) bb.add(e.getKey(), e.getValue());
+                Binding b = bb.build();
+                for (int n = row.getValue(); n > 0; n--) out.add(b);
             }
             return QueryIterPlainWrapper.create(out.iterator(), getExecContext());
         }

@@ -16,38 +16,70 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * A relation: a SET of tuples (a graph is a set of triples, so a single BGP
- * yields set semantics — bag/DISTINCT handling lives in ARQ, around the BGP).
- * A tuple maps each schema variable to an RDF Node. Immutable; all operations
- * return new Relations.
+ * A relation: a BAG of tuples, stored as distinct tuples each annotated with a
+ * positive multiplicity. A tuple maps each schema variable to an RDF Node.
+ * Immutable; all operations return new Relations.
+ *
+ * <p>The annotations form the counting semiring (ℕ, +, ×) of Wang et al.'s
+ * framework: {@link #project} adds the counts of tuples that collapse, {@link #join}
+ * multiplies the counts of the tuples it combines, {@link #semijoin} keeps the left
+ * count. With these rules an early projection commutes with the later joins, so
+ * π_O of the final result carries exactly the multiplicities SPARQL bag semantics
+ * assigns to a projected BGP. A relation matched from a graph starts with every
+ * count 1 (a graph is a set of triples). {@link #distinct()} collapses every count
+ * to 1 — the only place where DISTINCT enters; the algorithms never branch on it.
  */
 public final class Relation {
 
     private final Set<Var> schema;
-    private final Set<Map<Var, Node>> rows;
+    private final Map<Map<Var, Node>, Integer> rows;   // distinct tuple -> multiplicity (> 0)
 
-    private Relation(Set<Var> schema, Set<Map<Var, Node>> rows) {
+    private Relation(Set<Var> schema, Map<Map<Var, Node>, Integer> rows) {
         this.schema = Collections.unmodifiableSet(new LinkedHashSet<>(schema));
         this.rows = rows;
     }
 
     public Set<Var> schema()  { return schema; }
+    /** Number of distinct tuples. */
     public int rowCount()     { return rows.size(); }
-    public Set<Map<Var, Node>> rows() { return Collections.unmodifiableSet(rows); }
+    /** Sum of all multiplicities: the size of the bag. */
+    public long bagSize() {
+        long n = 0;
+        for (int c : rows.values()) n += c;
+        return n;
+    }
+    /** The distinct tuples. */
+    public Set<Map<Var, Node>> rows() { return Collections.unmodifiableSet(rows.keySet()); }
+    /** The distinct tuples with their multiplicities. */
+    public Map<Map<Var, Node>, Integer> counts() { return Collections.unmodifiableMap(rows); }
+    /** Multiplicity of {@code row}, 0 if absent. */
+    public int count(Map<Var, Node> row) { return rows.getOrDefault(row, 0); }
 
     public static Relation empty(Set<Var> schema) {
-        return new Relation(schema, new HashSet<>());
+        return new Relation(schema, new HashMap<>());
     }
 
-    /** Build a relation directly from materialized rows of RDF nodes. */
+    /** Build a relation from a set of materialized rows, each with multiplicity 1. */
     public static Relation fromRows(Set<Var> schema, Set<Map<Var, Node>> rows) {
-        return new Relation(schema, rows);
+        Map<Map<Var, Node>, Integer> counted = new HashMap<>(rows.size() * 2);
+        for (Map<Var, Node> r : rows) counted.put(r, 1);
+        return new Relation(schema, counted);
     }
 
-    /** The join identity: one empty tuple. Used for an empty BGP. */
+    /** Build a relation from rows with explicit multiplicities (each must be positive). */
+    public static Relation fromCounts(Set<Var> schema, Map<Map<Var, Node>, Integer> counts) {
+        Map<Map<Var, Node>, Integer> copy = new HashMap<>(counts.size() * 2);
+        for (Map.Entry<Map<Var, Node>, Integer> e : counts.entrySet()) {
+            if (e.getValue() <= 0) throw new IllegalArgumentException("multiplicity must be positive: " + e);
+            copy.put(e.getKey(), e.getValue());
+        }
+        return new Relation(schema, copy);
+    }
+
+    /** The join identity: one empty tuple with multiplicity 1. Used for an empty BGP. */
     public static Relation unit() {
-        Set<Map<Var, Node>> r = new HashSet<>();
-        r.add(new HashMap<>());
+        Map<Map<Var, Node>, Integer> r = new HashMap<>();
+        r.put(new HashMap<>(), 1);
         return new Relation(Set.of(), r);
     }
 
@@ -58,7 +90,7 @@ public final class Relation {
         return s;
     }
 
-    private static List<Node> project(Map<Var, Node> row, List<Var> vars) {
+    private static List<Node> key(Map<Var, Node> row, List<Var> vars) {
         List<Node> key = new ArrayList<>(vars.size());
         for (Var v : vars) key.add(row.get(v));
         return key;
@@ -66,25 +98,30 @@ public final class Relation {
 
     /**
      * Projection π_{vars}: keeps the columns in {@code vars} ∩ schema (schema order).
-     * Set semantics — rows that become equal collapse into one; multiplicities are
-     * lost, which is why the executor may not project before the full BGP result is
-     * built until step 10 adds counting-semiring annotations.
+     * Tuples that become equal collapse into one whose multiplicity is the sum.
      */
     public Relation project(Set<Var> vars) {
         List<Var> kept = new ArrayList<>();
         for (Var v : schema) if (vars.contains(v)) kept.add(v);
         if (kept.size() == schema.size()) return this;
 
-        Set<Map<Var, Node>> out = new HashSet<>();
-        for (Map<Var, Node> r : rows) {
+        Map<Map<Var, Node>, Integer> out = new HashMap<>();
+        for (Map.Entry<Map<Var, Node>, Integer> e : rows.entrySet()) {
             Map<Var, Node> m = new HashMap<>(kept.size() * 2);
-            for (Var v : kept) m.put(v, r.get(v));
-            out.add(m);
+            for (Var v : kept) m.put(v, e.getKey().get(v));
+            out.merge(m, e.getValue(), Integer::sum);
         }
         return new Relation(new LinkedHashSet<>(kept), out);
     }
 
-    /** Semijoin: keep my tuples that have a matching partner in {@code other}. */
+    /** Every multiplicity set to 1: the final step of a DISTINCT query. */
+    public Relation distinct() {
+        Map<Map<Var, Node>, Integer> out = new HashMap<>(rows.size() * 2);
+        for (Map<Var, Node> r : rows.keySet()) out.put(r, 1);
+        return new Relation(schema, out);
+    }
+
+    /** Semijoin: keep my tuples (with their multiplicities) that have a matching partner in {@code other}. */
     public Relation semijoin(Relation other) {
         List<Var> shared = sharedVars(other);
         if (shared.isEmpty()) {
@@ -92,47 +129,53 @@ public final class Relation {
             return other.rows.isEmpty() ? empty(schema) : this;
         }
         Set<List<Node>> keys = new HashSet<>();
-        for (Map<Var, Node> s : other.rows) keys.add(project(s, shared));
+        for (Map<Var, Node> s : other.rows.keySet()) keys.add(key(s, shared));
 
-        Set<Map<Var, Node>> kept = new HashSet<>();
-        for (Map<Var, Node> r : rows) {
-            if (keys.contains(project(r, shared))) kept.add(r);
+        Map<Map<Var, Node>, Integer> kept = new HashMap<>();
+        for (Map.Entry<Map<Var, Node>, Integer> e : rows.entrySet()) {
+            if (keys.contains(key(e.getKey(), shared))) kept.put(e.getKey(), e.getValue());
         }
         return new Relation(schema, kept);
     }
 
-    /** Natural join (hash join on shared variables; cross product if none). */
+    /**
+     * Natural join (hash join on shared variables; cross product if none). The
+     * multiplicity of a combined tuple is the product of the two inputs' counts.
+     */
     public Relation join(Relation other) {
         List<Var> shared = sharedVars(other);
         Set<Var> outSchema = new LinkedHashSet<>(schema);
         outSchema.addAll(other.schema);
-        Set<Map<Var, Node>> out = new HashSet<>();
+        Map<Map<Var, Node>, Integer> out = new HashMap<>();
 
         if (shared.isEmpty()) {
-            for (Map<Var, Node> r : rows) {
-                for (Map<Var, Node> s : other.rows) {
-                    Map<Var, Node> m = new HashMap<>(r);
-                    m.putAll(s);
-                    out.add(m);
+            for (Map.Entry<Map<Var, Node>, Integer> r : rows.entrySet()) {
+                for (Map.Entry<Map<Var, Node>, Integer> s : other.rows.entrySet()) {
+                    combine(out, r, s);
                 }
             }
             return new Relation(outSchema, out);
         }
 
-        Map<List<Node>, List<Map<Var, Node>>> index = new HashMap<>();
-        for (Map<Var, Node> s : other.rows) {
-            index.computeIfAbsent(project(s, shared), k -> new ArrayList<>()).add(s);
+        Map<List<Node>, List<Map.Entry<Map<Var, Node>, Integer>>> index = new HashMap<>();
+        for (Map.Entry<Map<Var, Node>, Integer> s : other.rows.entrySet()) {
+            index.computeIfAbsent(key(s.getKey(), shared), k -> new ArrayList<>()).add(s);
         }
-        for (Map<Var, Node> r : rows) {
-            List<Map<Var, Node>> matches = index.get(project(r, shared));
+        for (Map.Entry<Map<Var, Node>, Integer> r : rows.entrySet()) {
+            List<Map.Entry<Map<Var, Node>, Integer>> matches = index.get(key(r.getKey(), shared));
             if (matches == null) continue;
-            for (Map<Var, Node> s : matches) {
-                Map<Var, Node> m = new HashMap<>(r);
-                m.putAll(s);
-                out.add(m);
-            }
+            for (Map.Entry<Map<Var, Node>, Integer> s : matches) combine(out, r, s);
         }
         return new Relation(outSchema, out);
+    }
+
+    private static void combine(Map<Map<Var, Node>, Integer> out,
+                                Map.Entry<Map<Var, Node>, Integer> r, Map.Entry<Map<Var, Node>, Integer> s) {
+        Map<Var, Node> m = new HashMap<>(r.getKey());
+        m.putAll(s.getKey());
+        // Two distinct input pairs can only produce the same output tuple if they agree
+        // on every column, i.e. they are the same pair — but merge anyway, for safety.
+        out.merge(m, r.getValue() * s.getValue(), Integer::sum);
     }
 
     // ---- Test/demo convenience -----------------------------------------
@@ -142,24 +185,29 @@ public final class Relation {
 
     public static final class Builder {
         private final List<Var> vars = new ArrayList<>();
-        private final Set<Map<Var, Node>> rows = new HashSet<>();
+        private final Map<Map<Var, Node>, Integer> rows = new HashMap<>();
 
         private Builder(String... varNames) {
             for (String n : varNames) vars.add(Var.alloc(n));
         }
-        public Builder row(String... values) {
+        /** Adds one occurrence of the row; adding the same row again raises its multiplicity. */
+        public Builder row(String... values) { return rowTimes(1, values); }
+        /** Adds {@code count} occurrences of the row. */
+        public Builder rowTimes(int count, String... values) {
             if (values.length != vars.size())
                 throw new IllegalArgumentException("row arity mismatch");
+            if (count <= 0) throw new IllegalArgumentException("multiplicity must be positive");
             Map<Var, Node> m = new LinkedHashMap<>();
             for (int i = 0; i < values.length; i++) {
                 m.put(vars.get(i), NodeFactory.createURI("http://example.org/" + values[i]));
             }
-            rows.add(m);
+            rows.merge(m, count, Integer::sum);
             return this;
         }
-        public Relation build() { return new Relation(new LinkedHashSet<>(vars), rows); }
+        public Relation build() { return new Relation(new LinkedHashSet<>(vars), new HashMap<>(rows)); }
     }
 
+    /** Equal iff same schema and same bag: same distinct tuples with the same multiplicities. */
     @Override public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Relation other)) return false;
@@ -169,8 +217,12 @@ public final class Relation {
 
     @Override public String toString() {
         StringBuilder sb = new StringBuilder("Relation").append(schema)
-                .append(" (").append(rows.size()).append(" rows)\n");
-        for (Map<Var, Node> r : rows) sb.append("  ").append(r).append('\n');
+                .append(" (").append(rows.size()).append(" distinct rows, bag size ").append(bagSize()).append(")\n");
+        for (Map.Entry<Map<Var, Node>, Integer> r : rows.entrySet()) {
+            sb.append("  ").append(r.getKey());
+            if (r.getValue() != 1) sb.append(" ×").append(r.getValue());
+            sb.append('\n');
+        }
         return sb.toString();
     }
 }
