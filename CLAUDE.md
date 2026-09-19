@@ -47,7 +47,23 @@ part of the tested surface.
    with nothing multiplicity-sensitive in between). Never rewrites the tree.
 5. **`QueryClassifier`** — classifies an acyclic BGP against `O` as relation-dominated ⊂
    free-connex ⊂ acyclic and roots the join tree accordingly (dominating relation / free-connex
-   tree with connex subtree Tn / GYO root).
+   tree with connex subtree Tn / GYO root). Given cardinality estimates
+   (`classify(h, O, estimates)`) it applies the two §5.2 heuristics: the root is the largest
+   candidate of the class (dominating relations / Tn / all nodes) that mentions an output
+   variable, and GYO runs with a weighted ear order (small ears first, large witnesses first).
+   The two-argument `classify` is structure-only and unchanged.
+5a. **`CardinalityEstimator`** — cheap per-triple-pattern estimate taken before materialising.
+   `BoundedCountEstimator` (in-memory/generic: `Graph.find` counted up to
+   `YannakakisSymbols.ESTIMATE_LIMIT`, saturating) and `Tdb2CardinalityEstimator` (TDB2:
+   `stats.opt` predicate/type/total counts when present, else `NodeTupleTable.findAsNodeIds`
+   counted without decoding). `forGraph` picks; `CARDINALITY_ESTIMATOR` in the context
+   overrides. Nothing beyond `Graph.find` is reachable without the TDB2 cast — see the
+   interface javadoc.
+5b. **`DimensionFusion`** — Wang et al. §5.1: leaf siblings under R are replaced by their join
+   (Cartesian product if disjoint) when est(R) ≥ θ · ∏ est(leaf), θ =
+   `YannakakisSymbols.FUSION_RATIO` (default 1.0, the paper's break-even; ∞ turns it off).
+   Only within the absorbable group (A_i ∩ O ⊆ A_R) or the connex-compatible group
+   (A_i ∩ A_R ⊆ O), so Theorem 3.11 / the free-connex guarantee survive.
 6. **`Relation`** — immutable bag of tuples (`Var → Node` rows, each with a positive count; the
    counting semiring: `project` sums, `join` multiplies, `semijoin` keeps the left count,
    `distinct()` resets to 1) with `project`/`semijoin`/`join`.
@@ -67,8 +83,10 @@ part of the tested surface.
 registered globally via `QC.setFactory(ARQ.getContext(), FACTORY)` (`register()`/`unregister()`).
 Its `exec` override runs the analyzer once per execution; `execute(OpBGP)` checks acyclicity and —
 if acyclic — looks up `O` and the collapsible flag, then per incoming binding (`Stage`):
-substitutes the binding, classifies the substituted pattern against `O` restricted to the free
-variables (cached per binding shape), matches each triple against the active `Graph`, runs
+substitutes the binding, estimates each substituted pattern, classifies the substituted pattern
+against `O` restricted to the free variables with the estimates (cached per binding shape +
+estimate ranking), applies `DimensionFusion` (per binding, needs magnitudes), matches each
+triple against the active `Graph`, joins fused leaves, runs
 `YannakakisPlusEvaluator.evaluate`, applies `distinct()` iff collapsible, and emits each π_O row
 `count` times layered onto the incoming binding. If the BGP is cyclic (or there's no active
 graph), it delegates to stock ARQ (`super.execute(...)`) unchanged. The earlier
@@ -87,6 +105,14 @@ There are no external RDF/query fixture files — every model and query is built
   `OutputVariableSafetyTest` corpus (O from the analyzer, relations from the corpus graph), and
   on 200 random acyclic BGPs; it asserts Theorem 3.11 (one node, zero semijoins) on every
   relation-dominated case and zero general merges on every free-connex case.
+- `DimensionFusionTest` does the same for the estimate-aware classification and for fusion:
+  random estimates / corpus estimates must keep the class, both structural oracles and the
+  oracle bag (θ = 1 and θ = 0); the paper's R1(a) ⋈ R2(a,b) ⋈ R3(b) example, group separation
+  and the §5.2 root rules are pinned; an end-to-end part runs the executor against stock ARQ on
+  a star schema where fusion fires (`fusions()`), with θ and the estimator varied via context.
+- `CardinalityEstimatorTest` checks both estimators against known counts, including a real
+  TDB2 store under `target/tdb2-estimator/` with a generated `stats.opt` (never deleted: TDB2
+  memory-maps its files and Windows refuses).
 - **`DifferentialTest` and `OutputVariableSafetyTest` are the end-to-end correctness harness.**
   For each query they run stock ARQ and `YannakakisOpExecutor`-registered ARQ against the *same*
   in-memory model and assert the canonicalized result bags match — sorted row lists that keep
@@ -123,8 +149,9 @@ There are no external RDF/query fixture files — every model and query is built
   `owl:InverseFunctionalProperty` are a partial analogue, but they are out
   of scope.)
 - Fusion of dimension relations is cardinality-based, not key-based. It
-  does transfer to RDF and is in scope. See step 11 of
-  docs/claude-code-plan.md.
+  does transfer to RDF and is implemented in `DimensionFusion` (step 11);
+  estimates shape plans only and must never change an answer, so the
+  differential tests stay the gate for any change to it.
 - RDF triples limit hyperedge rank (arity) to 3. "Width" is reserved for
   hypertree width in this project — never use it for hyperedge arity.
 
@@ -148,6 +175,23 @@ There are no external RDF/query fixture files — every model and query is built
 - `OpWalker.walk(Op, OpVisitor)` with an `OpVisitorBase` subclass visits
   every `OpBGP`; `Algebra.compile(Query)` gives the unoptimised `Op`.
 - `Var.getVarName()` returns the bare name.
+- `Context.get(Symbol)`, `Context.getLong(Symbol, long)` (accepts String/Integer/Long),
+  `Context.set`/`unset`/`isDefined`.
+- TDB2 (verified against `jena-tdb2-6.0.0-sources.jar`): `GraphTDB extends GraphViewStorage`
+  with public `getDSG()`, `getNodeTupleTable()`, `getGraphName()` (null for the default
+  graph); `GraphViewSwitchable.getBaseGraph()` unwraps to the current `GraphTDB`;
+  `DatasetGraphTDB.getLocation()` is the storage dir (`Data-000N`), `stats.opt` lives there
+  or in its parent (container); `NodeTupleTable.findAsNodeIds(Node...)` takes `Node.ANY`
+  for wildcards, throws on variables, returns a null-iterator for unknown terms, and needs 3
+  args on the triple table / 4 on the quad table (`chooseNodeTupleTable`); `Location`
+  (`org.apache.jena.dboe.base.file`) has `getDirectoryPath()`, `isMem()`;
+  `org.apache.jena.dboe.sys.Names.optStats`; `Stats.gather(Graph)` → `StatsCollector.results()`,
+  `Stats.format(StatsResults)` → `Item`, `Stats.write(String, StatsResults)`.
+  `ReorderWeighted` keeps its `StatsMatcher` private — no getter; the dataset's context holds
+  only the executor factory. TDB2's own executor still wins over `register()` (tdb2-audit F1).
+- SSE: `SSE.readFile(String)`/`SSE.parse(String)` → `Item`; `Item.isTagged(String)`,
+  `getList()` (an `ItemList`, `Iterable<Item>`, with `size()`, `get(i)`, `car()`, `cdr()`),
+  `isNode()`, `getNode()`, `isList()`, `asLong()`; `Item.find(ItemList, String)`.
 
 If an API is not in this list, read the Jena source before using it.
 Do not invent method signatures.

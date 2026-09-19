@@ -1,7 +1,8 @@
 # Implementation inventory
 
-Snapshot of `at.ac.tuwien.thesis.yannakakis` as of step 10 (counting-semiring multiplicities,
-Algorithm 2, executor on Yannakakis+; see `docs/today.md`). Written to support Chapter 4: every
+Snapshot of `at.ac.tuwien.thesis.yannakakis` as of step 11 (cardinality estimation, dimension
+fusion, §5.2 plan-shape heuristics; step 10 was counting-semiring multiplicities, Algorithm 2,
+executor on Yannakakis+; see `docs/today.md`). Written to support Chapter 4: every
 class's responsibility, the data flow from `OpBGP` to result bindings, and every deviation from
 Wang et al.'s Yannakakis+ with the reason for each. Earlier snapshots cited line numbers; those
 went stale within a day, so this version cites methods.
@@ -10,12 +11,17 @@ went stale within a day, so this version cites methods.
 
 | Class | Path | Responsibility |
 |---|---|---|
-| `YannakakisOpExecutor` | `YannakakisOpExecutor.java` | The single ARQ integration point: an `OpExecutor` registered via `QC.setFactory` that runs the algebra analysis once per execution (`exec` override), intercepts `OpBGP` execution, and for acyclic BGPs runs classify → match → `YannakakisPlusEvaluator` per incoming binding, emitting π_O rows with their multiplicities (collapsed to 1 when the analyzer says the BGP sits under a DISTINCT). Cyclic BGPs and the no-active-graph case fall back to stock ARQ (`super.execute`). Counters `invocations()`, `analyses()`, `narrowedBgps()`, `collapsedBgps()` for tests. |
+| `YannakakisOpExecutor` | `YannakakisOpExecutor.java` | The single ARQ integration point: an `OpExecutor` registered via `QC.setFactory` that runs the algebra analysis once per execution (`exec` override), intercepts `OpBGP` execution, and for acyclic BGPs runs classify → match → `YannakakisPlusEvaluator` per incoming binding, emitting π_O rows with their multiplicities (collapsed to 1 when the analyzer says the BGP sits under a DISTINCT). Cyclic BGPs and the no-active-graph case fall back to stock ARQ (`super.execute`). Since step 11 the per-binding pipeline is estimate → classify (estimate-aware, cached per shape + estimate ranking) → fuse → match → evaluate. Counters `invocations()`, `analyses()`, `narrowedBgps()`, `collapsedBgps()`, `fusions()` for tests. |
+| `CardinalityEstimator` | `CardinalityEstimator.java` | Interface: a cheap, non-negative estimate of a triple pattern's match count before it is materialised. `forGraph(Graph, Context)` picks the instance under `YannakakisSymbols.CARDINALITY_ESTIMATOR` if set, else the TDB2 implementation for TDB2 graphs, else the bounded count. `UNKNOWN` (all 0) switches the heuristics off. Its javadoc records what the generic `Graph` API exposes (nothing beyond `find`). |
+| `BoundedCountEstimator` | `BoundedCountEstimator.java` | The in-memory / generic implementation: `Graph.find` counted up to `ESTIMATE_LIMIT`, saturating at the limit. |
+| `Tdb2CardinalityEstimator` | `Tdb2CardinalityEstimator.java` | TDB2 implementation (the only place that casts to `GraphTDB`/`GraphViewSwitchable`): reads the store's `stats.opt` (predicate counts, `rdf:type` counts, total; parsed once per path + mtime; default graph only) for `?s <p> ?o`, `?s rdf:type <T>`, `?s ?p ?o`, and otherwise counts `NodeId` tuples via `NodeTupleTable.findAsNodeIds` up to the limit without decoding nodes. |
+| `DimensionFusion` | `DimensionFusion.java` | Wang et al. §5.1 fusion of dimension relations on a classified join tree: leaf siblings under a node R are replaced by one fused node F = ⋈ of the leaves (Cartesian product without shared variables) when est(R) ≥ θ · ∏ est(leaf), greedily smallest first, at least two. Leaves are grouped (absorbable: A_i ∩ O ⊆ A_R; connex-compatible: A_i ∩ A_R ⊆ O) and fused only within a group so the class guarantees survive; Tn is adjusted. `Fused.fuseRelations` joins the materialised leaves. |
+| `YannakakisSymbols` | `YannakakisSymbols.java` | Context symbols: `FUSION_RATIO` (θ, default 1.0 = the paper's break-even), `ESTIMATE_LIMIT` (default 10 000), `CARDINALITY_ESTIMATOR` (instance override), with typed accessors. |
 | `AlgebraContextAnalyzer` | `AlgebraContextAnalyzer.java` | Read-only, single-pass walk of an ARQ `Op` tree computing, per `OpBGP` (keyed by object identity), (a) the output variables `O` the rest of the plan needs from that BGP — demand flows top-down: projection resets it; FILTER/ORDER BY/GROUP BY/aggregate/BIND expressions and all sibling operands of join-like operators extend it — and (b) `countsCollapsible`: true below an `OpDistinct` until a multiplicity-sensitive operator (`OpGroup`, `OpSlice`, `OpTopN`, `OpExtend`/`OpAssign`/`OpUnfold`, any fallback) intervenes, and true for the right operand of MINUS / semijoin / anti-join. Falls back to all variables and not-collapsible, with a counted `FallbackReason`, under `OpExt`/`OpService`/`OpPropFunc`/`OpProcedure`. Stores its `Analysis` in the execution `Context` under `AlgebraContextAnalyzer.SYMBOL`. Never modifies the tree. |
 | `QueryHypergraph` | `QueryHypergraph.java` | Builds a hypergraph view of a `BasicPattern` — variables as vertices, triple patterns as hyperedges (`Hyperedge` inner class, id = position in the BGP) — with both edge→vars and var→edges incidence maps; identifies join variables. |
-| `GyoReduction` | `GyoReduction.java` | GYO ear removal. `reduce(Map<Integer,Set<Var>>)` is the core over abstract edges (shared with the classifier for H+ and the connex projection); `decompose(QueryHypergraph)` wraps it into a `JoinTree`; `isAcyclic` is the executor's pre-check. `gyoRunCount()` is test-only instrumentation counting `reduce` runs. |
-| `JoinTree` | `JoinTree.java` | Rooted tree of hyperedges (one node per triple pattern). `build(h, rootId, parentOf)` constructs it from a child→parent map (used by GYO and by the classifier's re-rooted / free-connex trees); `satisfiesRunningIntersection()` is the connectedness self-check used as a correctness oracle in tests; `pretty()` prints it. |
-| `QueryClassifier` | `QueryClassifier.java` | Classifies an acyclic BGP against `O` (Wang et al. Def. 3.10 / Bagan–Durand–Grandjean): relation-dominated (one hyperedge ⊇ O; root = that edge), free-connex (H and H+ = H ∪ {O} acyclic; root = root of the free-connex tree, whose connex subtree Tn is exposed), or general acyclic (GYO root, Tn = all nodes). `satisfiesConnexProperty` is the test oracle for Tn. `classify` returns empty for cyclic BGPs. |
+| `GyoReduction` | `GyoReduction.java` | GYO ear removal. `reduce(Map<Integer,Set<Var>>)` is the core over abstract edges (shared with the classifier for H+ and the connex projection); `reduce(edges, estimates)` steers the (confluent) ear order by cardinality — ears smallest first, witnesses largest first — so large relations end up near the top; `decompose(QueryHypergraph)` wraps it into a `JoinTree`; `isAcyclic` is the executor's pre-check. `gyoRunCount()` is test-only instrumentation counting `reduce` runs. |
+| `JoinTree` | `JoinTree.java` | Rooted tree of hyperedges (one node per triple pattern, or a fused edge after `DimensionFusion`). `build(h, rootId, parentOf)` / `build(edges, rootId, parentOf)` construct it from a child→parent map (used by GYO, the classifier's re-rooted / free-connex trees, and fusion); `parentMap()`/`edges()` export that form; `satisfiesRunningIntersection()` is the connectedness self-check used as a correctness oracle in tests; `pretty()` prints it. |
+| `QueryClassifier` | `QueryClassifier.java` | Classifies an acyclic BGP against `O` (Wang et al. Def. 3.10 / Bagan–Durand–Grandjean): relation-dominated (one hyperedge ⊇ O; root = that edge), free-connex (H and H+ = H ∪ {O} acyclic; root = root of the free-connex tree, whose connex subtree Tn is exposed), or general acyclic (GYO root, Tn = all nodes). `classify(h, O, estimates)` additionally applies the §5.2 heuristics: the root is the largest node of the class's candidate pool (dominating relations / Tn / all nodes) that mentions an output variable, and both GYO runs use the weighted ear order. The two-argument `classify` is the structure-only version (BGP order). `satisfiesConnexProperty` is the test oracle for Tn. `classify` returns empty for cyclic BGPs. |
 | `Relation` | `Relation.java` | Immutable bag of tuples: distinct `Var → Node` rows each annotated with a positive count — the counting semiring (ℕ, +, ×). `project` sums collapsed rows, `join` (hash join on shared variables, cross product if none) multiplies, `semijoin` keeps the left count, graph matches start at 1, `distinct()` resets every count to 1. `rowCount()` counts distinct rows, `bagSize()` sums the counts. |
 | `YannakakisPlusEvaluator` | `YannakakisPlusEvaluator.java` | Wang et al. Algorithm 1 (`firstRound`: post-order absorb-or-semijoin with early projection onto O ∪ join variables, returning the reduced tree and semijoin/absorption counts; `evaluateRelationDominated` asserts Theorem 3.11) and Algorithm 2 (`secondRound`: merge children into the dangling-free root, dropping non-output join variables no remaining neighbour still uses; `setInvariantChecks` turns the free-connex "never a general merge" claim into an exception). `evaluate(Classification, rels)` combines them and returns π_O with multiplicities plus counters. |
 | `YannakakisEvaluator` | `YannakakisEvaluator.java` | The classical three-pass Yannakakis (upward semijoin → downward semijoin → upward join) returning the full join at the root. Untouched since step 4; no longer on the executor's path. Kept as the differential oracle for the Plus evaluator (π_O of its result is the bag-exact expected answer). |
@@ -53,23 +59,35 @@ Traced through `YannakakisOpExecutor`.
    Otherwise it bumps `invocations()`, looks up `O` via `AlgebraContextAnalyzer.outputVarsOrAll`
    (all variables if this exact `OpBGP` object was never analysed — ARQ manufactures fresh ones
    for quad patterns and for the `Substitute`d right side of `QueryIterOptionalIndex`) and the
-   collapsible flag via `countsCollapsible` (false when unanalysed), and returns a `Stage`
-   carrying both.
+   collapsible flag via `countsCollapsible` (false when unanalysed), picks the
+   `CardinalityEstimator` for the active graph (`CardinalityEstimator.forGraph`) and reads the
+   fusion ratio θ from the context (`YannakakisSymbols.fusionRatio`), and returns a `Stage`
+   carrying all of it.
 
 4. **Per-input-binding evaluation.** `Stage extends QueryIterRepeatApply`, so
    `nextStage(Binding)` runs once per binding arriving from the outer plan:
    - **Substitute**: every bound variable of the pattern is replaced by its node
      (`substitute`/`sub`), producing `bound`.
-   - **Classify (cached per binding shape)**: `O` is restricted to the variables still free in
-     `bound` (a variable the incoming binding already bound is a constant now and is carried by
-     the parent binding) and `QueryClassifier.classify(hypergraph(bound), restricted)` yields the
-     kind, the rooted `JoinTree` and the effective `O`. The result depends only on the shape
-     (which positions are variables and which), so it is memoised in `planCache` keyed by
-     `shapeKey(bound)` for the lifetime of the `Stage`
+   - **Estimate**: one `estimator.estimate(triple)` per substituted pattern, before anything is
+     materialised (the bound constants change the sizes, so this is per binding). The estimates
+     shape the plan only; they never affect the answer.
+   - **Classify (cached per binding shape + estimate ranking)**: `O` is restricted to the
+     variables still free in `bound` (a variable the incoming binding already bound is a constant
+     now and is carried by the parent binding) and
+     `QueryClassifier.classify(hypergraph(bound), restricted, estimates)` yields the kind, the
+     rooted `JoinTree` (root and GYO shape following the §5.2 heuristics) and the effective `O`.
+     The result depends only on the shape (which positions are variables and which) and on the
+     relative order of the estimates, so it is memoised in `planCache` keyed by
+     `planKey(bound, estimates)` for the lifetime of the `Stage`
      (`YannakakisOpExecutorTest#joinTreeCacheAvoidsRedecomposePerBindingShape`).
+   - **Fuse**: `DimensionFusion.apply(classification, estimates, θ)` — needs the magnitudes, so
+     it runs per binding on the cached tree; returns the (possibly) fused classification and the
+     list of fusions (`fusions()` counts them).
    - **Materialize**: `matchTriple` runs one `Graph.find` per triple with `Node.ANY` in variable
      positions; `bindPos` makes repeated variables within one triple agree. Each match becomes a
-     row with count 1 in a `Relation` keyed by the triple's position.
+     row with count 1 in a `Relation` keyed by the triple's position. `Fused.fuseRelations` then
+     joins the fused leaves' relations (Cartesian product when disjoint) under the fused ids —
+     the small relations are joined before anything touches their large parent.
    - **Evaluate**: `YannakakisPlusEvaluator.evaluate(classification, rels).relation()` — π_O of
      the BGP with multiplicities (see section 2a). The classification is never empty here: binding
      variables to constants only deletes hypergraph vertices, so an acyclic BGP stays acyclic
@@ -111,7 +129,20 @@ Traced through `YannakakisOpExecutor`.
 - **PK-FK-based rules omitted.** `CLAUDE.md` hard rule: cycle elimination, aggregation
   elimination and semijoin elimination (Wang et al. §5.1) rely on key constraints RDF does not
   have. Nothing in the pipeline detects or exploits them. Dimension fusion (cardinality-based)
-  is in scope but not implemented yet (step 11).
+  transfers and is implemented (`DimensionFusion`, step 11).
+- **Dimension fusion is restricted to leaf siblings and to one group per parent.** The paper
+  states the rule for "a large relation and multiple small relations" without saying where in
+  the tree they sit. Here only leaves under a common parent R are fused (subtrees below a
+  fused leaf would be semijoined against the larger product instead of the leaf), and only
+  within the absorbable or the connex-compatible group, so that F is either absorbed in round
+  one or merged reducibly in round two — fusing across the groups could produce a node that is
+  neither. The threshold est(R) ≥ θ · ∏ est(S_i) with θ = 1 is the paper's own cost argument
+  (a Cartesian product cheaper than a pass over the large relation); the paper gives no number.
+- **Cardinality estimates are cheap lower bounds, not statistics.** Wang et al. §5.2 use the
+  host DBMS's cardinality estimator and cost model over full plan enumeration. Here: bounded
+  `find`/`NodeId` counts saturating at `ESTIMATE_LIMIT`, plus TDB2's `stats.opt` counts (per
+  predicate, per `rdf:type` object, total) when the file exists. No join-size or selectivity
+  estimation, no cost model, no plan enumeration (`CLAUDE.md`: not to be built).
 - **Two-sided reducibility in Algorithm 2.** The one-sided condition ("for every other neighbour
   R_k of R_i, A_k ∩ A_i ⊆ O") ignores R_j's neighbours; on the star {x,a},{x,b},{x,c} with
   O = {a,b,c} it lets the merge of two arms drop x while the third arm still joins on it. The
@@ -127,9 +158,14 @@ Traced through `YannakakisOpExecutor`.
   variables and are never collapsible. Safe, not tight.
 - **`OpReduced` is not a DISTINCT.** REDUCED permits dropping duplicates, but stock ARQ keeps
   some, and the differential tests compare bags against stock ARQ.
-- **No cost-based join tree selection.** `GyoReduction.findEar` picks the first ear in list order
-  and its first valid witness; the classifier only re-roots for output-sensitivity. Isolated
-  components attach to whichever remaining edge comes first, as a cross product.
+- **Two of the three §5.2 plan-shape heuristics, no plan enumeration.** The paper enumerates all
+  join trees (GYO / GHDs) and prunes with three rules, then costs the rest. Here the root is
+  chosen within the class's candidate pool by "contains an output variable, then largest
+  estimate" and the GYO ear order is weighted (small ears first, large witnesses first), which
+  realises "root contains output attributes" and "larger relations at the top" on the single
+  tree GYO produces; "prefer bushy plans with lower height" is not implemented. Without
+  estimates (`classify(h, O)`) the BGP order decides as before; isolated components attach to
+  the preferred witness as a cross product.
 - **Execution-time interception only, never algebra rewriting.** `CLAUDE.md` hard rule: ARQ has
   no semijoin operator. The `Transform`-based scaffold was deleted (step 3); the analyzer only
   reads the tree.
@@ -140,4 +176,5 @@ Traced through `YannakakisOpExecutor`.
   OPTIONAL around the BGP; the BGP inside still takes the Yannakakis+ path (the substituted body
   is an unanalysed `OpBGP`, hence O = all variables).
 - **No RDF-specific match optimizations.** One generic `Graph.find` per triple pattern; no
-  predicate statistics or index selection beyond what Jena's `Graph.find` provides.
+  index selection beyond what Jena's `Graph.find` provides. Predicate statistics are used for
+  plan shape only (`Tdb2CardinalityEstimator`), never for matching.
