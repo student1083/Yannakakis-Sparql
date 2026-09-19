@@ -5,6 +5,7 @@ import org.apache.jena.sparql.core.Var;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -27,6 +28,9 @@ import java.util.Set;
  *       free-connex join tree built by {@link #freeConnexJoinTree}.</li>
  *   <li><b>Acyclic</b> otherwise. Root = whatever GYO happened to leave standing.</li>
  * </ul>
+ * Given cardinality estimates ({@link #classify(QueryHypergraph, Set, Map)}) the root within
+ * each class and the shape of the GYO tree additionally follow the plan-shape heuristics of
+ * Wang et al. §5.2; {@link DimensionFusion} then applies the §5.1 fusion rule on top.
  *
  * <p>A free-connex join tree carries a <em>connex subtree</em> Tn: a connected set
  * of nodes containing the root with O ⊆ vars(Tn) such that every non-root node R
@@ -73,30 +77,80 @@ public final class QueryClassifier {
     // ---- classification --------------------------------------------------
 
     /**
-     * Classify {@code h} with respect to {@code outputVars}, most specific class first.
+     * Classify {@code h} with respect to {@code outputVars}, most specific class first,
+     * from the structure alone: the join tree is shaped by GYO in BGP order, and only the
+     * root is chosen for output-sensitivity (dominating relation / free-connex root / the
+     * GYO root).
      *
      * @return empty iff {@code h} is cyclic (no join tree exists at all)
      */
     public static Optional<Classification> classify(QueryHypergraph h, Set<Var> outputVars) {
+        return classify(h, outputVars, Map.of());
+    }
+
+    /**
+     * {@link #classify(QueryHypergraph, Set)} with cardinality estimates (edge id → estimated
+     * size of the triple pattern's relation) applied to the two plan-shape heuristics of
+     * Wang et al. §5.2 that need no plan enumeration:
+     * <ul>
+     *   <li><b>the root contains output variables where possible</b> — the root is chosen
+     *       among the nodes the class allows (dominating relations; the connex subtree Tn;
+     *       every node for a general acyclic query), preferring one that mentions an output
+     *       variable;</li>
+     *   <li><b>larger relations near the top</b> — among those, the largest estimate wins
+     *       (ties in BGP order), and the GYO runs try small ears first and prefer large
+     *       witnesses ({@link GyoReduction#reduce(Map, Map)}), so large relations become
+     *       parents.</li>
+     * </ul>
+     * Re-rooting never leaves the class: any dominating relation may be the root of a
+     * relation-dominated tree; any node of Tn may be the root of a free-connex tree (the
+     * connex condition A_R ∩ A_parent ⊆ O is symmetric on Tn's edges, and re-rooting within
+     * the connected Tn flips only those edges); a general acyclic tree may be rooted anywhere.
+     * With an empty map this is exactly the structure-only classification.
+     */
+    public static Optional<Classification> classify(QueryHypergraph h, Set<Var> outputVars, Map<Integer, Long> estimates) {
         Set<Var> o = restrict(h, outputVars);
         if (h.edges().isEmpty()) {                          // empty BGP: nothing to join, nothing to output
             return Optional.of(new Classification(Kind.FREE_CONNEX, JoinTree.empty(), Set.of(), o));
         }
-        Optional<GyoReduction.Decomposition> gyo = GyoReduction.reduce(GyoReduction.edgeVarsOf(h));
+        Optional<GyoReduction.Decomposition> gyo = GyoReduction.reduce(GyoReduction.edgeVarsOf(h), estimates);
         if (gyo.isEmpty()) return Optional.empty();         // cyclic
 
-        Optional<QueryHypergraph.Hyperedge> dominating = relationDominated(h, o);
-        if (dominating.isPresent()) {
-            int rootId = dominating.get().id();
+        List<Integer> dominating = dominatingRelations(h, o);
+        if (!dominating.isEmpty()) {
+            int rootId = estimates.isEmpty() ? dominating.get(0) : preferredRoot(dominating, h, o, estimates);
             JoinTree tree = JoinTree.build(h, rootId, reroot(gyo.get().parentOf(), rootId));
             return Optional.of(new Classification(Kind.RELATION_DOMINATED, tree, Set.of(tree.root()), o));
         }
 
-        Optional<Classification> connex = freeConnexJoinTree(h, o);
+        Optional<Classification> connex = freeConnexJoinTree(h, o, estimates);
         if (connex.isPresent()) return connex;
 
-        JoinTree tree = JoinTree.build(h, gyo.get().rootId(), gyo.get().parentOf());
+        int rootId = gyo.get().rootId();
+        Map<Integer, Integer> parentOf = gyo.get().parentOf();
+        if (!estimates.isEmpty()) {
+            List<Integer> all = new ArrayList<>();
+            for (QueryHypergraph.Hyperedge e : h.edges()) all.add(e.id());
+            rootId = preferredRoot(all, h, o, estimates);
+            parentOf = reroot(parentOf, rootId);
+        }
+        JoinTree tree = JoinTree.build(h, rootId, parentOf);
         return Optional.of(new Classification(Kind.ACYCLIC, tree, new LinkedHashSet<>(tree.nodes()), o));
+    }
+
+    /**
+     * Wang et al. §5.2 root choice among {@code candidates}: a node mentioning an output
+     * variable if any does, then the largest estimate, then BGP order (the candidates are
+     * expected in BGP order; the sort is stable).
+     */
+    private static int preferredRoot(List<Integer> candidates, QueryHypergraph h, Set<Var> o, Map<Integer, Long> estimates) {
+        List<Integer> pool = new ArrayList<>();
+        for (Integer id : candidates) {
+            if (!Collections.disjoint(h.edges().get(id).vars(), o)) pool.add(id);
+        }
+        if (pool.isEmpty()) pool.addAll(candidates);
+        pool.sort(Comparator.comparingLong(id -> -estimates.getOrDefault(id, 0L)));
+        return pool.get(0);
     }
 
     /**
@@ -110,11 +164,17 @@ public final class QueryClassifier {
      * @return the first dominating hyperedge in BGP order, empty if there is none
      */
     public static Optional<QueryHypergraph.Hyperedge> relationDominated(QueryHypergraph h, Set<Var> outputVars) {
-        Set<Var> o = restrict(h, outputVars);
+        List<Integer> dominating = dominatingRelations(h, restrict(h, outputVars));
+        return dominating.isEmpty() ? Optional.empty() : Optional.of(h.edges().get(dominating.get(0)));
+    }
+
+    /** Ids of every hyperedge containing all of {@code o} (already restricted), in BGP order. */
+    private static List<Integer> dominatingRelations(QueryHypergraph h, Set<Var> o) {
+        List<Integer> ids = new ArrayList<>();
         for (QueryHypergraph.Hyperedge e : h.edges()) {
-            if (e.vars().containsAll(o)) return Optional.of(e);
+            if (e.vars().containsAll(o)) ids.add(e.id());
         }
-        return Optional.empty();
+        return ids;
     }
 
     /**
@@ -147,6 +207,18 @@ public final class QueryClassifier {
      * not check whether the query is also relation-dominated — {@link #classify} does.
      */
     public static Optional<Classification> freeConnexJoinTree(QueryHypergraph h, Set<Var> outputVars) {
+        return freeConnexJoinTree(h, outputVars, Map.of());
+    }
+
+    /**
+     * {@link #freeConnexJoinTree(QueryHypergraph, Set)} with cardinality estimates: both
+     * GYO runs prefer small ears and large witnesses, and the tree is re-rooted at the Tn
+     * node preferred by the §5.2 heuristics (see {@link #classify(QueryHypergraph, Set, Map)});
+     * the synthetic [O] edge carries no estimate. Identical to the unweighted construction
+     * when the map is empty.
+     */
+    public static Optional<Classification> freeConnexJoinTree(QueryHypergraph h, Set<Var> outputVars,
+                                                              Map<Integer, Long> estimates) {
         Set<Var> o = restrict(h, outputVars);
         if (h.edges().isEmpty()) {
             return Optional.of(new Classification(Kind.FREE_CONNEX, JoinTree.empty(), Set.of(), o));
@@ -156,7 +228,7 @@ public final class QueryClassifier {
 
         int oId = h.edges().size();                         // ids are 0..n-1, so n is free
         Map<Integer, Set<Var>> plus = augmented(h, o);
-        Optional<GyoReduction.Decomposition> gyoPlus = GyoReduction.reduce(plus);
+        Optional<GyoReduction.Decomposition> gyoPlus = GyoReduction.reduce(plus, estimates);
         if (gyoPlus.isEmpty()) return Optional.empty();     // H+ cyclic -> not free-connex
 
         // Root T+ at [O]; its children are the tops of the subtrees, i.e. Tn.
@@ -170,7 +242,7 @@ public final class QueryClassifier {
             }
         }
         // [O] is the root of T+, so it has at least one child (h is non-empty).
-        GyoReduction.Decomposition connex = GyoReduction.reduce(connexEdges)
+        GyoReduction.Decomposition connex = GyoReduction.reduce(connexEdges, estimates)
                 .orElseThrow(() -> new IllegalStateException(
                         "unreachable: the O-projections of the children of [O] are the vertex "
                                 + "restriction of the acyclic H to O minus subset edges, hence acyclic"));
@@ -181,7 +253,14 @@ public final class QueryClassifier {
             if (pc.getValue() != oId) parentOf.put(pc.getKey(), pc.getValue());
         }
         parentOf.putAll(connex.parentOf());
-        JoinTree tree = JoinTree.build(h, connex.rootId(), parentOf);
+        int rootId = connex.rootId();
+        if (!estimates.isEmpty()) {
+            // §5.2 root choice within Tn; the path from the GYO root lies inside Tn, so
+            // re-rooting flips only Tn edges and every subtree below Tn keeps its parent.
+            rootId = preferredRoot(new ArrayList<>(connexEdges.keySet()), h, o, estimates);
+            parentOf = reroot(parentOf, rootId);
+        }
+        JoinTree tree = JoinTree.build(h, rootId, parentOf);
 
         Set<JoinTree.Node> tn = new LinkedHashSet<>();
         for (Integer id : connexEdges.keySet()) tn.add(tree.node(id));

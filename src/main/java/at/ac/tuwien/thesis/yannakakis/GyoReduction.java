@@ -3,6 +3,7 @@ package at.ac.tuwien.thesis.yannakakis;
 import org.apache.jena.sparql.core.Var;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -23,6 +24,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>An edge with no shared variables is an isolated component; it attaches to
  * an arbitrary remaining edge as a cross-product join, so acyclic BGPs with
  * independent components still produce a single join tree.
+ *
+ * <p>Ear removal is confluent: if the hypergraph is acyclic, every sequence of
+ * valid ear removals reaches a single edge, and every witness choice yields a join
+ * tree. The order is therefore a free plan-shape parameter. {@link #reduce(Map, Map)}
+ * takes cardinality estimates and uses them for the second heuristic of Wang et al.
+ * §5.2 ("larger relations at the top of the tree"): ears are tried smallest first, so
+ * small relations become children early and the largest edge is what remains standing
+ * (the root), and among several valid witnesses the largest is preferred, so large
+ * relations become parents. Without estimates the BGP order is used as before.
  */
 public final class GyoReduction {
 
@@ -72,21 +82,45 @@ public final class GyoReduction {
      * @return the decomposition if alpha-acyclic, empty if cyclic
      */
     static Optional<Decomposition> reduce(Map<Integer, Set<Var>> edges) {
+        return reduce(edges, Map.of());
+    }
+
+    /**
+     * {@link #reduce(Map)} with cardinality estimates (edge id → estimated size) steering
+     * the ear order: candidate ears are tried in ascending, candidate witnesses in
+     * descending estimate order. Edges without an estimate (e.g. the synthetic [O] edge
+     * of {@link QueryClassifier}) sort last in both orders — where map order put them
+     * before — and with an empty map the result is identical to the unweighted call.
+     * Sorting is stable, so ties keep BGP order.
+     *
+     * @param edges at least one edge
+     * @param estimates estimated cardinalities, may be empty or partial
+     * @return the decomposition if alpha-acyclic, empty if cyclic
+     */
+    static Optional<Decomposition> reduce(Map<Integer, Set<Var>> edges, Map<Integer, Long> estimates) {
         if (edges.isEmpty()) throw new IllegalArgumentException("reduce needs at least one edge");
         GYO_RUNS.incrementAndGet();
         Map<Integer, Set<Var>> edgeVars = new LinkedHashMap<>(edges);
         Map<Integer, Integer> parentOf = new HashMap<>();   // child id -> parent id
-        List<Integer> remaining = new ArrayList<>(edgeVars.keySet());
 
-        while (remaining.size() > 1) {
-            EarPick pick = findEar(remaining, edgeVars);
+        List<Integer> earOrder = new ArrayList<>(edgeVars.keySet());
+        List<Integer> witnessOrder = new ArrayList<>(edgeVars.keySet());
+        if (!estimates.isEmpty()) {
+            // unweighted edges sort last in both orders (largest as an ear, smallest as a witness)
+            earOrder.sort(Comparator.comparingLong(id -> estimates.getOrDefault(id, Long.MAX_VALUE)));
+            witnessOrder.sort(Comparator.comparingLong(id -> -estimates.getOrDefault(id, Long.MIN_VALUE + 1)));
+        }
+
+        while (earOrder.size() > 1) {
+            EarPick pick = findEar(earOrder, witnessOrder, edgeVars);
             if (pick == null) return Optional.empty();      // edges remain, no ear -> cyclic
             parentOf.put(pick.ear(), pick.witness());
-            remaining.remove((Integer) pick.ear());
+            earOrder.remove((Integer) pick.ear());
+            witnessOrder.remove((Integer) pick.ear());
             edgeVars.remove(pick.ear());
         }
 
-        int rootId = remaining.get(0);                      // last edge standing = root
+        int rootId = earOrder.get(0);                       // last edge standing = root
         return Optional.of(new Decomposition(rootId, parentOf));
     }
 
@@ -97,25 +131,29 @@ public final class GyoReduction {
 
     private record EarPick(int ear, int witness) {}
 
-    private static EarPick findEar(List<Integer> remaining, Map<Integer, Set<Var>> edgeVars) {
+    /**
+     * The first ear in {@code earOrder} together with its first valid witness in
+     * {@code witnessOrder}; both lists hold the same remaining edges.
+     */
+    private static EarPick findEar(List<Integer> earOrder, List<Integer> witnessOrder, Map<Integer, Set<Var>> edgeVars) {
         // how many remaining edges contain each variable
         Map<Var, Integer> count = new HashMap<>();
-        for (Integer id : remaining) {
+        for (Integer id : earOrder) {
             for (Var v : edgeVars.get(id)) count.merge(v, 1, Integer::sum);
         }
 
-        for (Integer eId : remaining) {
+        for (Integer eId : earOrder) {
             Set<Var> shared = new LinkedHashSet<>();
             for (Var v : edgeVars.get(eId)) {
                 if (count.get(v) >= 2) shared.add(v);       // shared with some other edge
             }
 
             if (shared.isEmpty()) {                         // isolated component
-                for (Integer wId : remaining) {
+                for (Integer wId : witnessOrder) {
                     if (!wId.equals(eId)) return new EarPick(eId, wId);
                 }
             } else {                                        // need a single witness edge
-                for (Integer wId : remaining) {
+                for (Integer wId : witnessOrder) {
                     if (wId.equals(eId)) continue;
                     if (edgeVars.get(wId).containsAll(shared)) return new EarPick(eId, wId);
                 }

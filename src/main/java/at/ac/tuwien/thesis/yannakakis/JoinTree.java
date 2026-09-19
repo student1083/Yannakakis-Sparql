@@ -59,8 +59,17 @@ public final class JoinTree {
      * (re-rooted / free-connex trees).
      */
     static JoinTree build(QueryHypergraph h, int rootId, Map<Integer, Integer> parentOf) {
+        return build(h.edges(), rootId, parentOf);
+    }
+
+    /**
+     * {@link #build(QueryHypergraph, int, Map)} over an explicit edge collection, for trees
+     * whose nodes are not exactly the hyperedges of a BGP ({@link DimensionFusion} replaces
+     * several leaves by one fused edge).
+     */
+    static JoinTree build(Collection<QueryHypergraph.Hyperedge> edges, int rootId, Map<Integer, Integer> parentOf) {
         Map<Integer, Node> nodes = new LinkedHashMap<>();
-        for (QueryHypergraph.Hyperedge e : h.edges()) {
+        for (QueryHypergraph.Hyperedge e : edges) {
             nodes.put(e.id(), new Node(e));
         }
         for (Map.Entry<Integer, Integer> pc : parentOf.entrySet()) {
@@ -77,6 +86,22 @@ public final class JoinTree {
     public int size()               { return byEdgeId.size(); }
     /** The node of the hyperedge with this id (the triple's position in the BGP), or null. */
     public Node node(int edgeId)    { return byEdgeId.get(edgeId); }
+
+    /** The hyperedges of all nodes, in node order. */
+    public List<QueryHypergraph.Hyperedge> edges() {
+        List<QueryHypergraph.Hyperedge> out = new ArrayList<>(byEdgeId.size());
+        for (Node n : nodes()) out.add(n.edge());
+        return out;
+    }
+
+    /** Child id → parent id for every non-root node: the form {@link #build} consumes. */
+    public Map<Integer, Integer> parentMap() {
+        Map<Integer, Integer> parentOf = new LinkedHashMap<>();
+        for (Node n : nodes()) {
+            if (n.parent() != null) parentOf.put(n.edge().id(), n.parent().edge().id());
+        }
+        return parentOf;
+    }
 
     /** Verifies the connectedness condition for every variable. */
     public boolean satisfiesRunningIntersection() {

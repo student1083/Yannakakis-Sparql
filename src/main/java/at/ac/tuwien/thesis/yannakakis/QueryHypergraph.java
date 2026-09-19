@@ -26,10 +26,13 @@ import java.util.Set;
  */
 public class QueryHypergraph {
 
-    /** One hyperedge = one triple pattern of the BGP. */
+    /**
+     * One hyperedge = one triple pattern of the BGP — or, after {@link DimensionFusion},
+     * the union of several ({@link #isFused()}), whose relation is the join of its parts.
+     */
     public static final class Hyperedge {
-        private final int id;          // position of the triple within the BGP
-        private final Triple triple;   // kept for the evaluation phase later
+        private final int id;          // position of the triple within the BGP; ≥ BGP size for fused edges
+        private final Triple triple;   // null for a fused edge
         private final Set<Var> vars;   // the vertices this edge covers
 
         Hyperedge(int id, Triple triple, Set<Var> vars) {
@@ -38,11 +41,18 @@ public class QueryHypergraph {
             this.vars = Collections.unmodifiableSet(vars);
         }
 
-        public int id()        { return id; }
-        public Triple triple() { return triple; }
-        public Set<Var> vars() { return vars; }
+        /** A fused edge over the variables of several triple patterns; it has no triple of its own. */
+        static Hyperedge fused(int id, Set<Var> vars) {
+            return new Hyperedge(id, null, new LinkedHashSet<>(vars));
+        }
 
-        @Override public String toString() { return "e" + id + vars; }
+        public int id()          { return id; }
+        /** The triple pattern; null for a fused edge. */
+        public Triple triple()   { return triple; }
+        public Set<Var> vars()   { return vars; }
+        public boolean isFused() { return triple == null; }
+
+        @Override public String toString() { return (isFused() ? "f" : "e") + id + vars; }
     }
 
     private final List<Hyperedge> edges;
