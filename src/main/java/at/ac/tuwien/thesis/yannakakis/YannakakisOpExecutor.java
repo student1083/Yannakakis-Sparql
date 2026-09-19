@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -107,27 +108,147 @@ public class YannakakisOpExecutor extends OpExecutor {
         BasicPattern pattern = opBGP.getPattern();
         Graph activeGraph = execCxt.getActiveGraph();
 
-        boolean acyclic = activeGraph != null
-                && GyoReduction.isAcyclic(QueryHypergraph.fromBasicPattern(pattern));
+        if (activeGraph == null) {
+            return super.execute(opBGP, input);           // no active graph -> native ARQ
+        }
 
-        if (!acyclic) {
-            return super.execute(opBGP, input);          // cyclic / no graph -> native ARQ
-        }
-        COUNTER.incrementAndGet();
-        // O by OpBGP identity; all variables if this object was never analysed.
-        // A missing O is never an error.
+        List<BasicPattern> components = connectedComponents(pattern);
+
+        // O / collapsibility / filters are keyed by the OpBGP's identity in the analyzer's
+        // table (recorded once for the whole BGP); they are looked up once here and reused,
+        // unchanged, for every component split out of this same BGP.
         Set<Var> outputVars = AlgebraContextAnalyzer.outputVarsOrAll(execCxt, opBGP);
-        if (!outputVars.containsAll(AlgebraContextAnalyzer.varsOf(pattern))) {
-            NARROWED.incrementAndGet();
-        }
         boolean collapsible = AlgebraContextAnalyzer.countsCollapsible(execCxt, opBGP);
-        if (collapsible) COLLAPSED.incrementAndGet();
         Map<Var, List<Expr>> singleVarFilters = AlgebraContextAnalyzer.singleVarFilters(execCxt, opBGP);
-        LOG.debug("BGP {} output variables O = {}, counts collapsible = {}, single-var filters = {}",
-                pattern, outputVars, collapsible, singleVarFilters);
+
+        if (components.size() <= 1) {
+            if (!GyoReduction.isAcyclic(QueryHypergraph.fromBasicPattern(pattern))) {
+                return super.execute(opBGP, input);       // cyclic -> native ARQ
+            }
+            CardinalityEstimator estimator = CardinalityEstimator.forGraph(activeGraph, execCxt.getContext());
+            double fusionRatio = YannakakisSymbols.fusionRatio(execCxt.getContext());
+            return startAcyclicComponent(pattern, outputVars, collapsible, singleVarFilters,
+                    estimator, fusionRatio, input);
+        }
+
+        // The BGP splits into several components that share no variable with each other
+        // (a connected component of the primal/Gaifman graph over the BGP's variables).
+        // Each is acyclic-or-cyclic on its own account, independently of how the others
+        // turn out: an acyclic component's relation and a cyclic component's ARQ-evaluated
+        // rows share no variable, so chaining their evaluation over one another's output
+        // bindings is exactly a cross product, whichever order they run in. Smallest
+        // estimate first keeps the intermediate binding stream small.
         CardinalityEstimator estimator = CardinalityEstimator.forGraph(activeGraph, execCxt.getContext());
         double fusionRatio = YannakakisSymbols.fusionRatio(execCxt.getContext());
-        return new Stage(pattern, outputVars, collapsible, singleVarFilters, estimator, fusionRatio, input, execCxt);
+        List<BasicPattern> ordered = new ArrayList<>(components);
+        ordered.sort(Comparator.comparingLong(c -> componentEstimate(c, estimator)));
+
+        List<String> handling = new ArrayList<>(ordered.size());
+        QueryIterator cur = input;
+        for (BasicPattern component : ordered) {
+            boolean acyclic = GyoReduction.isAcyclic(QueryHypergraph.fromBasicPattern(component));
+            if (acyclic) {
+                handling.add("Yannakakis+ " + component);
+                cur = startAcyclicComponent(component, outputVars, collapsible, singleVarFilters,
+                        estimator, fusionRatio, cur);
+            } else {
+                handling.add("stock ARQ (cyclic) " + component);
+                cur = super.execute(new OpBGP(component), cur);
+            }
+        }
+        LOG.info("BGP {} split into {} connected component(s): {}", pattern, ordered.size(), handling);
+        return cur;
+    }
+
+    /** Starts (and instruments) the Yannakakis+ path for one acyclic component. */
+    private QueryIterator startAcyclicComponent(BasicPattern component, Set<Var> outputVars, boolean collapsible,
+            Map<Var, List<Expr>> singleVarFilters, CardinalityEstimator estimator, double fusionRatio,
+            QueryIterator input) {
+        COUNTER.incrementAndGet();
+        if (!outputVars.containsAll(AlgebraContextAnalyzer.varsOf(component))) {
+            NARROWED.incrementAndGet();
+        }
+        if (collapsible) COLLAPSED.incrementAndGet();
+        LOG.debug("component {} output variables O = {}, counts collapsible = {}, single-var filters = {}",
+                component, outputVars, collapsible, singleVarFilters);
+        return new Stage(component, outputVars, collapsible, singleVarFilters, estimator, fusionRatio, input, execCxt);
+    }
+
+    /**
+     * Splits a BGP into its connected components over shared variables (the Gaifman graph
+     * of the BGP's variables: two triples are connected iff they share a variable, taken
+     * transitively). A variable-free (ground) triple shares no variable with anything and
+     * is therefore its own singleton component. Order among the returned patterns follows
+     * first-occurrence of each component's representative triple; callers that care about
+     * evaluation order re-sort explicitly.
+     */
+    private static List<BasicPattern> connectedComponents(BasicPattern pattern) {
+        List<Triple> triples = pattern.getList();
+        if (triples.size() <= 1) {
+            return List.of(pattern);
+        }
+
+        Map<Var, Var> parent = new LinkedHashMap<>();
+        for (Triple t : triples) {
+            Var first = null;
+            for (Var v : varsOf(t)) {
+                parent.putIfAbsent(v, v);
+                if (first == null) first = v; else union(parent, first, v);
+            }
+        }
+
+        Map<Var, BasicPattern> byRoot = new LinkedHashMap<>();
+        List<BasicPattern> groundComponents = new ArrayList<>();
+        for (Triple t : triples) {
+            Set<Var> vars = varsOf(t);
+            if (vars.isEmpty()) {
+                BasicPattern bp = new BasicPattern();
+                bp.add(t);
+                groundComponents.add(bp);
+                continue;
+            }
+            Var root = find(parent, vars.iterator().next());
+            byRoot.computeIfAbsent(root, k -> new BasicPattern()).add(t);
+        }
+
+        List<BasicPattern> components = new ArrayList<>(byRoot.values());
+        components.addAll(groundComponents);
+        return components;
+    }
+
+    private static Set<Var> varsOf(Triple t) {
+        Set<Var> vars = new LinkedHashSet<>();
+        addVar(vars, t.getSubject());
+        addVar(vars, t.getPredicate());
+        addVar(vars, t.getObject());
+        return vars;
+    }
+
+    private static Var find(Map<Var, Var> parent, Var v) {
+        Var root = v;
+        while (!parent.get(root).equals(root)) root = parent.get(root);
+        Var cur = v;
+        while (!cur.equals(root)) {
+            Var next = parent.get(cur);
+            parent.put(cur, root);
+            cur = next;
+        }
+        return root;
+    }
+
+    private static void union(Map<Var, Var> parent, Var a, Var b) {
+        Var ra = find(parent, a), rb = find(parent, b);
+        if (!ra.equals(rb)) parent.put(ra, rb);
+    }
+
+    /** Sum of each triple's own cardinality estimate; a plan-shaping heuristic only. */
+    private static long componentEstimate(BasicPattern component, CardinalityEstimator estimator) {
+        long sum = 0;
+        for (Triple t : component) {
+            long e = estimator.estimate(t);
+            sum = (sum > Long.MAX_VALUE - e) ? Long.MAX_VALUE : sum + e;
+        }
+        return sum;
     }
 
     // ---- registration ---------------------------------------------------

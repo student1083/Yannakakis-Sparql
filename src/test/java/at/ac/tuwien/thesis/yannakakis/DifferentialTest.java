@@ -270,13 +270,21 @@ class DifferentialTest {
         }
 
         @Test void cyclicCoreWithAcyclicTail() {
-            // a single BGP that contains a triangle plus a pendant edge is
-            // cyclic as a whole -> the entire BGP must delegate
-            assertSameBagAndDelegated(socialModel(), PREFIX + """
+            // a single BGP containing a cyclic triangle and a variable-disjoint acyclic
+            // tail: the two are separate connected components, so the tail is expected
+            // to take the Yannakakis+ path on its own while the triangle's component
+            // delegates to stock ARQ; the two component results combine as a cross
+            // product (see YannakakisOpExecutor.execute(OpBGP, QueryIterator)).
+            Model m = socialModel();
+            YannakakisOpExecutor.resetCounter();
+            List<String> rows = assertSameBag(m, PREFIX + """
                     SELECT * WHERE {
                       ?x ex:knows ?y . ?y ex:knows ?z . ?x ex:knows ?z .
-                      ?z ex:knows ?w .
+                      ?p ex:livesIn ?city .
                     }""");
+            assertEquals(1, YannakakisOpExecutor.invocations(),
+                    "expected exactly the acyclic tail component to take the Yannakakis path");
+            assertFalse(rows.isEmpty(), "test data should produce a non-empty cross product");
         }
     }
 

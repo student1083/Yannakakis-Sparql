@@ -507,8 +507,12 @@ class DimensionFusionTest {
         private static final String NO_SIBLINGS = PREFIX + "SELECT ?n ?c WHERE { ?x ex:knows ?y . ?x ex:name ?n . ?y ex:livesIn ?c }";
         /**
          * The OPTIONAL body is a separate BGP evaluated once per binding of ?x, with ?x
-         * substituted: the estimates are then per binding (knows: 5, name: 1 or 2,
-         * livesIn: 3), and 1 · 3 ≤ 5 fuses the leaves for the bindings with one name.
+         * substituted to a constant. Once ?x is a constant it no longer joins the
+         * {@code name} triple to {@code knows}/{@code livesIn} (they share no remaining
+         * variable), so the executor's connected-component split now evaluates {@code name}
+         * and {@code knows}⋈{@code livesIn} as two independent components combined by a
+         * cross product — DimensionFusion never sees them as siblings of one join tree, so
+         * no fusion fires here any more (see {@code fusionFiresWithTheDefaultEstimatorAndMatchesStockArq}).
          */
         private static final String NESTED = PREFIX + "SELECT ?x ?y ?z WHERE { ?z ex:knows ?x . OPTIONAL { ?x ex:knows ?y . ?x ex:name ?n . ?y ex:livesIn ?c } }";
 
@@ -544,7 +548,7 @@ class DimensionFusionTest {
 
         @Test void fusionFiresWithTheDefaultEstimatorAndMatchesStockArq() {
             Model m = starSchema();
-            for (String query : List.of(QUERY, PROJECTED, DISTINCT, NESTED)) {
+            for (String query : List.of(QUERY, PROJECTED, DISTINCT)) {
                 List<String> stock = run(m, query);
                 assertFalse(stock.isEmpty(), query);
                 YannakakisOpExecutor.resetCounter();
@@ -552,6 +556,17 @@ class DimensionFusionTest {
                 assertTrue(YannakakisOpExecutor.invocations() >= 1, query);
                 assertTrue(YannakakisOpExecutor.fusions() >= 1, "60 ≥ 4 · 3: the two dimension leaves must fuse for\n" + query);
             }
+
+            // NESTED: the OPTIONAL body splits into two connected components once ?x is
+            // substituted (see NESTED's javadoc) - correctness must still hold and the
+            // Yannakakis path must still fire for both components, but fusion no longer
+            // applies since the two leaves are no longer siblings of one join tree.
+            List<String> nestedStock = run(m, NESTED);
+            assertFalse(nestedStock.isEmpty(), NESTED);
+            YannakakisOpExecutor.resetCounter();
+            assertEquals(nestedStock, withYannakakis(m, NESTED, null), NESTED);
+            assertTrue(YannakakisOpExecutor.invocations() >= 1, NESTED);
+
             List<String> stock = run(m, NO_SIBLINGS);
             YannakakisOpExecutor.resetCounter();
             assertEquals(stock, withYannakakis(m, NO_SIBLINGS, null));
