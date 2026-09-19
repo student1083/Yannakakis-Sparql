@@ -135,6 +135,59 @@ class AlgebraContextAnalyzerTest {
         assertEquals(vars("x", "z"), outputOf(a, bgpWithPredicate(root, "p")));
     }
 
+    // ---- single-variable filter conjunct extraction (matchTriple pre-filter hint) ----
+
+    private static Map<Var, List<org.apache.jena.sparql.expr.Expr>> filtersOf(Analysis a, OpBGP bgp) {
+        return a.entry(bgp).orElseThrow().singleVarFilters();
+    }
+
+    @Test
+    void directFilterExtractsSingleVariableEqualityConjunct() {
+        // Filter(BGP): ?a is constrained by an equality to a constant.
+        Op root = compile("SELECT * WHERE { ?a ex:p ?b . ?b ex:q ?c . FILTER(?a = ex:c) }");
+        Analysis a = AlgebraContextAnalyzer.analyze(root);
+        OpBGP bgp = bgpWithPredicate(root, "p");
+        Map<Var, List<org.apache.jena.sparql.expr.Expr>> filters = filtersOf(a, bgp);
+        assertEquals(1, filters.getOrDefault(Var.alloc("a"), List.of()).size());
+    }
+
+    @Test
+    void directFilterSplitsTopLevelAndIntoSeparateConjuncts() {
+        Op root = compile("SELECT ?x WHERE { ?x ex:p ?y . ?y ex:q ?z FILTER(?z > 1 && ?z < 10) }");
+        Analysis a = AlgebraContextAnalyzer.analyze(root);
+        Map<Var, List<org.apache.jena.sparql.expr.Expr>> filters = filtersOf(a, bgpWithPredicate(root, "p"));
+        assertEquals(2, filters.getOrDefault(Var.alloc("z"), List.of()).size(),
+                "the top-level && should be split into two independent conjuncts on ?z");
+    }
+
+    @Test
+    void directFilterOnTwoVariablesIsNotExtracted() {
+        // Neither ?a nor ?b can be decided from a single node, so no conjunct is recorded.
+        Op root = compile("SELECT * WHERE { ?a ex:p ?b . FILTER(?a = ?b) }");
+        Analysis a = AlgebraContextAnalyzer.analyze(root);
+        assertTrue(filtersOf(a, bgpWithPredicate(root, "p")).isEmpty());
+    }
+
+    @Test
+    void directFilterWithUnsupportedFunctionIsNotExtracted() {
+        // BOUND is not in the whitelist (it is always true for a matched candidate node, but
+        // more importantly not one of the recognised forms) -- rejection is always safe.
+        Op root = compile("SELECT * WHERE { ?a ex:p ?b . FILTER(BOUND(?a)) }");
+        Analysis a = AlgebraContextAnalyzer.analyze(root);
+        assertTrue(filtersOf(a, bgpWithPredicate(root, "p")).isEmpty());
+    }
+
+    @Test
+    void filterNotDirectlyOverABgpExtractsNothing() {
+        // (filter (> ?z 1) (join (bgp ?x p ?y) (bgp ?y q ?z))): the filter sits above a
+        // join, not directly above either BGP, so neither gets a conjunct even though ?z
+        // alone would otherwise qualify.
+        Op root = compile("SELECT * WHERE { { ?x ex:p ?y } { ?y ex:q ?z } FILTER(?z > 1) }");
+        Analysis a = AlgebraContextAnalyzer.analyze(root);
+        assertTrue(filtersOf(a, bgpWithPredicate(root, "p")).isEmpty());
+        assertTrue(filtersOf(a, bgpWithPredicate(root, "q")).isEmpty());
+    }
+
     @Test
     void nestedSubqueryWithGroupBy() {
         // (project (?x)

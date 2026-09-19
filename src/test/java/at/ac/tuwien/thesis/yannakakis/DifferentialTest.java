@@ -1,5 +1,6 @@
 package at.ac.tuwien.thesis.yannakakis;
 
+import org.apache.jena.datatypes.xsd.XSDDatatype;
 import org.apache.jena.query.Query;
 import org.apache.jena.query.QueryExecution;
 import org.apache.jena.query.QueryExecutionFactory;
@@ -347,6 +348,84 @@ class DifferentialTest {
             String q = PREFIX + "SELECT * WHERE { ?x ex:knows ?y . } LIMIT 2";
             assertEquals(runBag(socialModel(), q).size(),
                     withYannakakis(socialModel(), q, false).size());
+        }
+    }
+
+    // ---- 3b. single-variable filter conjuncts pushed into matchTriple -------
+
+    @Nested
+    @DisplayName("single-variable FILTER conjuncts directly above a BGP match stock ARQ")
+    class SingleVarFilterPushdown {
+
+        private static final String XSD_PREFIX = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\n";
+
+        /** People with knows-edges, integer ages (one with an unusual lexical form) and lang-tagged labels. */
+        private Model typedModel() {
+            Model m = ModelFactory.createDefaultModel();
+            Property knows = m.createProperty(NS + "knows");
+            Property age   = m.createProperty(NS + "age");
+            Property label = m.createProperty(NS + "label");
+            Resource alice = m.createResource(NS + "alice");
+            Resource bob   = m.createResource(NS + "bob");
+            Resource carol = m.createResource(NS + "carol");
+            m.add(alice, knows, bob).add(bob, knows, carol);
+            // "01"^^xsd:integer is SPARQL-value-equal to 1 despite a different lexical form:
+            // node-identity pushdown must never be used for this datatype, only a post-filter.
+            m.add(alice, age, m.createTypedLiteral("01", XSDDatatype.XSDinteger));
+            m.add(bob, age, m.createTypedLiteral(30, XSDDatatype.XSDinteger));
+            m.add(carol, age, m.createTypedLiteral(5, XSDDatatype.XSDinteger));
+            m.add(alice, label, m.createLiteral("hello", "en"));
+            m.add(bob, label, m.createLiteral("hallo", "de"));
+            return m;
+        }
+
+        @Test void equalityToIriConstantIsSafeToPushDown() {
+            assertSameBagAndFired(typedModel(), PREFIX + """
+                    SELECT * WHERE { ?a ex:knows ?b . ?b ex:knows ?c . FILTER(?a = ex:alice) }""");
+        }
+
+        @Test void equalityToStringConstantIsSafeToPushDown() {
+            assertSameBagAndFired(typedModel(), PREFIX + """
+                    SELECT * WHERE { ?p ex:label ?l . FILTER(?l = "hello") }""");
+        }
+
+        @Test void equalityToNumericConstantMustNotDropValueEqualButLexicallyDifferentMatches() {
+            // "01"^^xsd:integer = 1 by SPARQL value equality; a naive Graph.find pushdown on
+            // node identity would silently miss it. Must still find alice.
+            YannakakisOpExecutor.resetCounter();
+            List<String> rows = assertSameBag(typedModel(), XSD_PREFIX + PREFIX + """
+                    SELECT * WHERE { ?p ex:age ?a . FILTER(?a = 1) }""");
+            assertTrue(YannakakisOpExecutor.invocations() >= 1);
+            assertTrue(rows.stream().anyMatch(r -> r.contains("alice")),
+                    "01^^xsd:integer must still match FILTER(?a = 1): " + rows);
+        }
+
+        @Test void regexIsAppliedWhileScanning() {
+            assertSameBagAndFired(typedModel(), PREFIX + """
+                    SELECT * WHERE { ?p ex:label ?l . FILTER(REGEX(?l, "^h")) }""");
+        }
+
+        @Test void numericRangeSplitFromTopLevelAnd() {
+            assertSameBagAndFired(typedModel(), PREFIX + """
+                    SELECT * WHERE { ?p ex:age ?a . FILTER(?a >= 5 && ?a <= 10) }""");
+        }
+
+        @Test void datatypeTest() {
+            assertSameBagAndFired(typedModel(), XSD_PREFIX + PREFIX + """
+                    SELECT * WHERE { ?p ex:age ?a . FILTER(DATATYPE(?a) = xsd:integer) }""");
+        }
+
+        @Test void langTest() {
+            assertSameBagAndFired(typedModel(), PREFIX + """
+                    SELECT * WHERE { ?p ex:label ?l . FILTER(LANG(?l) = "en") }""");
+        }
+
+        @Test void twoVariableFilterIsNeverPushedDownButStillCorrect() {
+            assertSameBagAndFired(typedModel(), PREFIX + """
+                    SELECT * WHERE {
+                      ?p ex:age ?a . ?q ex:age ?b .
+                      FILTER(?a < ?b)
+                    }""");
         }
     }
 

@@ -1,5 +1,6 @@
 package at.ac.tuwien.thesis.yannakakis;
 
+import org.apache.jena.datatypes.xsd.XSDDatatype;
 import org.apache.jena.graph.Graph;
 import org.apache.jena.graph.Node;
 import org.apache.jena.graph.Triple;
@@ -18,6 +19,8 @@ import org.apache.jena.sparql.engine.iterator.QueryIterRepeatApply;
 import org.apache.jena.sparql.engine.main.OpExecutor;
 import org.apache.jena.sparql.engine.main.OpExecutorFactory;
 import org.apache.jena.sparql.engine.main.QC;
+import org.apache.jena.sparql.expr.E_Equals;
+import org.apache.jena.sparql.expr.Expr;
 import org.apache.jena.sparql.util.Context;
 import org.apache.jena.util.iterator.ExtendedIterator;
 import org.slf4j.Logger;
@@ -119,10 +122,12 @@ public class YannakakisOpExecutor extends OpExecutor {
         }
         boolean collapsible = AlgebraContextAnalyzer.countsCollapsible(execCxt, opBGP);
         if (collapsible) COLLAPSED.incrementAndGet();
-        LOG.debug("BGP {} output variables O = {}, counts collapsible = {}", pattern, outputVars, collapsible);
+        Map<Var, List<Expr>> singleVarFilters = AlgebraContextAnalyzer.singleVarFilters(execCxt, opBGP);
+        LOG.debug("BGP {} output variables O = {}, counts collapsible = {}, single-var filters = {}",
+                pattern, outputVars, collapsible, singleVarFilters);
         CardinalityEstimator estimator = CardinalityEstimator.forGraph(activeGraph, execCxt.getContext());
         double fusionRatio = YannakakisSymbols.fusionRatio(execCxt.getContext());
-        return new Stage(pattern, outputVars, collapsible, estimator, fusionRatio, input, execCxt);
+        return new Stage(pattern, outputVars, collapsible, singleVarFilters, estimator, fusionRatio, input, execCxt);
     }
 
     // ---- registration ---------------------------------------------------
@@ -164,6 +169,8 @@ public class YannakakisOpExecutor extends OpExecutor {
         private final BasicPattern pattern;
         private final Set<Var> outputVars;
         private final boolean collapsible;
+        /** Single-variable filter conjuncts by BGP variable (see {@link AlgebraContextAnalyzer.Entry}). */
+        private final Map<Var, List<Expr>> singleVarFilters;
         private final CardinalityEstimator estimator;
         private final double fusionRatio;
         /**
@@ -172,12 +179,13 @@ public class YannakakisOpExecutor extends OpExecutor {
          */
         private final Map<Object, Optional<QueryClassifier.Classification>> planCache = new HashMap<>();
 
-        Stage(BasicPattern pattern, Set<Var> outputVars, boolean collapsible,
+        Stage(BasicPattern pattern, Set<Var> outputVars, boolean collapsible, Map<Var, List<Expr>> singleVarFilters,
               CardinalityEstimator estimator, double fusionRatio, QueryIterator input, ExecutionContext execCxt) {
             super(input, execCxt);
             this.pattern = pattern;
             this.outputVars = outputVars;
             this.collapsible = collapsible;
+            this.singleVarFilters = singleVarFilters;
             this.estimator = estimator;
             this.fusionRatio = fusionRatio;
         }
@@ -236,7 +244,7 @@ public class YannakakisOpExecutor extends OpExecutor {
             Graph graph = getExecContext().getActiveGraph();
             Map<Integer, Relation> rels = new HashMap<>();
             id = 0;
-            for (Triple t : bound) rels.put(id++, matchTriple(graph, t));
+            for (Triple t : bound) rels.put(id++, matchTriple(graph, t, singleVarFilters, getExecContext()));
             rels = fused.fuseRelations(rels);
 
             // 6. evaluate via Yannakakis+
@@ -300,17 +308,41 @@ public class YannakakisOpExecutor extends OpExecutor {
         return n;
     }
 
-    private static Relation matchTriple(Graph g, Triple pat) {
+    /**
+     * Matches {@code pat} against {@code g}, applying {@code filters}' single-variable
+     * conjuncts (from {@link AlgebraContextAnalyzer}) while scanning so that rows which
+     * cannot survive them are never turned into {@link Relation} rows.
+     *
+     * <p>This is a size optimisation only. The real FILTER stays above the BGP in the ARQ
+     * plan and is still evaluated there by ARQ, unchanged; SPARQL FILTER semantics — error
+     * propagation, unbound handling, effective boolean value over the whole row — are never
+     * reimplemented here. A conjunct we apply is evaluated with {@link Expr#isSatisfied},
+     * the exact same call ARQ's own FILTER uses, on a binding of just that one variable; since
+     * the conjunct mentions no other variable ({@link AlgebraContextAnalyzer}), that result is
+     * exactly what ARQ's FILTER will get for it over the full row, so discarding a candidate
+     * here can never discard a row ARQ's FILTER would have kept.
+     */
+    private static Relation matchTriple(Graph g, Triple pat, Map<Var, List<Expr>> filters, ExecutionContext execCxt) {
         Node s = pat.getSubject(), p = pat.getPredicate(), o = pat.getObject();
 
         Set<Var> schema = new LinkedHashSet<>();
         addVar(schema, s); addVar(schema, p); addVar(schema, o);
 
+        // Equality to a constant becomes a bound position in Graph.find instead of a
+        // post-filter, when node identity is guaranteed to coincide with SPARQL value
+        // equality for that constant (see equalityPushdownSafe): IRIs, blank nodes, and
+        // string-like literals. Value-based datatypes (numeric, boolean, date/time) are
+        // excluded because two of their nodes can be SPARQL-equal without being identical
+        // terms (e.g. "1" and "01" as xsd:integer); pushing those into find() could silently
+        // miss matches, so they stay a post-filter via isSatisfied below instead.
         Set<Map<Var, Node>> rows = new HashSet<>();
-        ExtendedIterator<Triple> it = g.find(match(s), match(p), match(o));
+        ExtendedIterator<Triple> it = g.find(matchNode(s, filters), matchNode(p, filters), matchNode(o, filters));
         try {
             while (it.hasNext()) {
                 Triple m = it.next();
+                if (!passesFilters(s, m.getSubject(), filters, execCxt)) continue;
+                if (!passesFilters(p, m.getPredicate(), filters, execCxt)) continue;
+                if (!passesFilters(o, m.getObject(), filters, execCxt)) continue;
                 Map<Var, Node> row = new HashMap<>();
                 if (bindPos(row, s, m.getSubject())
                         && bindPos(row, p, m.getPredicate())
@@ -324,7 +356,56 @@ public class YannakakisOpExecutor extends OpExecutor {
         return Relation.fromRows(schema, rows);
     }
 
-    private static Node match(Node n) { return Var.isVar(n) ? Node.ANY : n; }
+    /** {@code Node.ANY} for a free variable, the pattern's own constant otherwise — unless a
+     *  pushed-down equality conjunct narrows a free variable's position to a safe constant. */
+    private static Node matchNode(Node n, Map<Var, List<Expr>> filters) {
+        if (!Var.isVar(n)) return n;
+        List<Expr> conjuncts = filters.get(Var.alloc(n));
+        if (conjuncts == null) return Node.ANY;
+        for (Expr e : conjuncts) {
+            Node constant = equalityConstant(e, Var.alloc(n));
+            if (constant != null && equalityPushdownSafe(constant)) return constant;
+        }
+        return Node.ANY;
+    }
+
+    /** The other side's constant node if {@code e} is exactly {@code var = constant} (either order). */
+    private static Node equalityConstant(Expr e, Var var) {
+        if (!(e instanceof E_Equals eq)) return null;
+        Expr a = eq.getArg1(), b = eq.getArg2();
+        if (a.isVariable() && var.equals(a.asVar()) && b.isConstant()) return b.getConstant().asNode();
+        if (b.isVariable() && var.equals(b.asVar()) && a.isConstant()) return a.getConstant().asNode();
+        return null;
+    }
+
+    /**
+     * Whether {@code constant}'s RDF-term identity coincides with SPARQL value equality, so
+     * matching it as an exact {@code Graph.find} term is equivalent to the SPARQL {@code =}
+     * conjunct it came from: IRIs and blank nodes (equality is term identity by definition),
+     * and literals with no datatype / {@code xsd:string} / a language tag (equality is lexical
+     * form plus language, i.e. term identity again). Any other literal datatype is excluded.
+     */
+    private static boolean equalityPushdownSafe(Node constant) {
+        if (constant.isURI() || constant.isBlank()) return true;
+        if (!constant.isLiteral()) return false;
+        String lang = constant.getLiteralLanguage();
+        if (lang != null && !lang.isEmpty()) return true;
+        String dt = constant.getLiteralDatatypeURI();
+        return dt == null || dt.equals(XSDDatatype.XSDstring.getURI());
+    }
+
+    /** Whether the candidate node at pattern position {@code patNode} satisfies its conjuncts, if any. */
+    private static boolean passesFilters(Node patNode, Node candidate, Map<Var, List<Expr>> filters,
+                                          ExecutionContext execCxt) {
+        if (!Var.isVar(patNode)) return true;
+        List<Expr> conjuncts = filters.get(Var.alloc(patNode));
+        if (conjuncts == null) return true;
+        Binding b = BindingFactory.binding(Var.alloc(patNode), candidate);
+        for (Expr e : conjuncts) {
+            if (!e.isSatisfied(b, execCxt)) return false;
+        }
+        return true;
+    }
 
     private static void addVar(Set<Var> s, Node n) { if (Var.isVar(n)) s.add(Var.alloc(n)); }
 

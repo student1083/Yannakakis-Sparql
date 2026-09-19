@@ -45,6 +45,20 @@ import org.apache.jena.sparql.algebra.op.OpUnion;
 import org.apache.jena.sparql.core.BasicPattern;
 import org.apache.jena.sparql.core.Var;
 import org.apache.jena.sparql.engine.ExecutionContext;
+import org.apache.jena.sparql.expr.E_Datatype;
+import org.apache.jena.sparql.expr.E_Equals;
+import org.apache.jena.sparql.expr.E_GreaterThan;
+import org.apache.jena.sparql.expr.E_GreaterThanOrEqual;
+import org.apache.jena.sparql.expr.E_Lang;
+import org.apache.jena.sparql.expr.E_LangMatches;
+import org.apache.jena.sparql.expr.E_LessThan;
+import org.apache.jena.sparql.expr.E_LessThanOrEqual;
+import org.apache.jena.sparql.expr.E_LogicalAnd;
+import org.apache.jena.sparql.expr.E_LogicalNot;
+import org.apache.jena.sparql.expr.E_LogicalOr;
+import org.apache.jena.sparql.expr.E_NotEquals;
+import org.apache.jena.sparql.expr.E_Regex;
+import org.apache.jena.sparql.expr.Expr;
 import org.apache.jena.sparql.expr.ExprAggregator;
 import org.apache.jena.sparql.expr.ExprList;
 import org.apache.jena.sparql.expr.ExprVars;
@@ -52,6 +66,7 @@ import org.apache.jena.sparql.util.Symbol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -153,11 +168,25 @@ public final class AlgebraContextAnalyzer {
      * the right operand of MINUS / a semijoin / an anti-join, where only existence matters.
      * A collapsible BGP may report each distinct row once; the algorithms never branch on
      * this, only the final emission does.
+     *
+     * <p>{@code singleVarFilters} holds, per BGP variable, the conjuncts of a <em>directly</em>
+     * enclosing {@link OpFilter} ({@code Filter(BGP)}, not a filter over a join or some other
+     * operator) that constrain exactly that one variable and can be decided from a single
+     * candidate node for it — see {@link #isSingleNodeEvaluable}. This is a size hint for the
+     * executor's {@code matchTriple}, nothing more: SPARQL FILTER semantics (errors, unbound
+     * handling, effective boolean value) are never reimplemented here, and the real FILTER
+     * still runs, unchanged, above the BGP in the ARQ plan.
      */
-    public record Entry(Set<Var> outputVars, Optional<FallbackReason> fallbackReason, boolean countsCollapsible) {
+    public record Entry(Set<Var> outputVars, Optional<FallbackReason> fallbackReason, boolean countsCollapsible,
+                         Map<Var, List<Expr>> singleVarFilters) {
         public Entry {
             outputVars = Collections.unmodifiableSet(new LinkedHashSet<>(outputVars));
             Objects.requireNonNull(fallbackReason);
+            Map<Var, List<Expr>> filtersCopy = new LinkedHashMap<>();
+            for (Map.Entry<Var, List<Expr>> e : singleVarFilters.entrySet()) {
+                filtersCopy.put(e.getKey(), List.copyOf(e.getValue()));
+            }
+            singleVarFilters = Collections.unmodifiableMap(filtersCopy);
         }
 
         public boolean isFallback() { return fallbackReason.isPresent(); }
@@ -200,6 +229,16 @@ public final class AlgebraContextAnalyzer {
             return e != null && e.countsCollapsible();
         }
 
+        /**
+         * Single-variable filter conjuncts for {@code bgp} (see {@link Entry}), or an empty
+         * map if it was never analysed. The safe default: no conjuncts means no pre-filtering,
+         * never an incorrect one.
+         */
+        public Map<Var, List<Expr>> singleVarFilters(OpBGP bgp) {
+            Entry e = entries.get(bgp);
+            return e == null ? Map.of() : e.singleVarFilters();
+        }
+
         /** Number of analysed BGP nodes. */
         public int size() { return entries.size(); }
 
@@ -211,7 +250,8 @@ public final class AlgebraContextAnalyzer {
         /** Number of {@link #outputVarsOrAll} calls that hit a BGP outside the analysed tree. */
         public int unanalysedLookups() { return unanalysedLookups; }
 
-        private void record(OpBGP bgp, Set<Var> outputVars, Optional<FallbackReason> reason, boolean collapsible) {
+        private void record(OpBGP bgp, Set<Var> outputVars, Optional<FallbackReason> reason, boolean collapsible,
+                            Map<Var, List<Expr>> filters) {
             Entry previous = entries.get(bgp);
             if (previous != null) {
                 // The same OpBGP object reachable twice (shared subtree): keep the union of
@@ -224,11 +264,23 @@ public final class AlgebraContextAnalyzer {
                 if (mergedReason.isPresent() && previous.fallbackReason().isEmpty()) {
                     reasonCounts.merge(mergedReason.get(), 1, Integer::sum);
                 }
-                entries.put(bgp, new Entry(merged, mergedReason, previous.countsCollapsible() && collapsible));
+                // A conjunct only survives on both paths reaching this shared BGP object:
+                // one seen on only one path might not actually stand above the BGP on the
+                // other, and keeping it there would reject rows that path's real FILTER
+                // (if any) would have kept. Never bolder here either.
+                Map<Var, List<Expr>> mergedFilters = new LinkedHashMap<>();
+                for (Map.Entry<Var, List<Expr>> e : previous.singleVarFilters().entrySet()) {
+                    List<Expr> theirs = filters.get(e.getKey());
+                    if (theirs == null) continue;
+                    List<Expr> common = new ArrayList<>(e.getValue());
+                    common.retainAll(theirs);
+                    if (!common.isEmpty()) mergedFilters.put(e.getKey(), common);
+                }
+                entries.put(bgp, new Entry(merged, mergedReason, previous.countsCollapsible() && collapsible, mergedFilters));
                 return;
             }
             reason.ifPresent(r -> reasonCounts.merge(r, 1, Integer::sum));
-            entries.put(bgp, new Entry(outputVars, reason, collapsible));
+            entries.put(bgp, new Entry(outputVars, reason, collapsible, filters));
         }
     }
 
@@ -288,6 +340,15 @@ public final class AlgebraContextAnalyzer {
         return lookup(execCxt).map(a -> a.countsCollapsible(bgp)).orElse(false);
     }
 
+    /**
+     * Convenience for executors: {@code bgp}'s single-variable filter conjuncts (see
+     * {@link Entry}), or an empty map when there is no table or the BGP is not in it —
+     * the safe default applies no pre-filtering.
+     */
+    public static Map<Var, List<Expr>> singleVarFilters(ExecutionContext execCxt, OpBGP bgp) {
+        return lookup(execCxt).map(a -> a.singleVarFilters(bgp)).orElse(Map.of());
+    }
+
     /** All variables of a basic pattern, in first-occurrence order. */
     public static Set<Var> varsOf(BasicPattern pattern) {
         Set<Var> vars = new LinkedHashSet<>();
@@ -303,8 +364,19 @@ public final class AlgebraContextAnalyzer {
 
     private static void walk(Op op, Set<Var> demand, Optional<FallbackReason> fallback, boolean collapsible,
                              Analysis analysis) {
+        walk(op, demand, fallback, collapsible, analysis, Map.of());
+    }
+
+    /**
+     * {@code pendingFilters} carries single-variable conjuncts computed by a directly
+     * enclosing {@link OpFilter} for exactly the next node visited (an {@code OpBGP}); every
+     * other recursion path passes an empty map, so a conjunct can never leak past the one
+     * BGP it was written above.
+     */
+    private static void walk(Op op, Set<Var> demand, Optional<FallbackReason> fallback, boolean collapsible,
+                             Analysis analysis, Map<Var, List<Expr>> pendingFilters) {
         if (op == null) return;
-        op.visit(new Walker(demand, fallback, collapsible, analysis));
+        op.visit(new Walker(demand, fallback, collapsible, analysis, pendingFilters));
     }
 
     private static void addVar(Set<Var> acc, Node n) {
@@ -326,6 +398,65 @@ public final class AlgebraContextAnalyzer {
     }
 
     /**
+     * Splits {@code exprs} (already an implicit conjunction) into leaf conjuncts by further
+     * flattening any top-level {@code &&}, then keeps only the leaves that mention exactly
+     * one of {@code bgpVars} and are {@link #isSingleNodeEvaluable} for it. Grouped by that
+     * one variable for {@code matchTriple}.
+     */
+    private static Map<Var, List<Expr>> singleVarConjuncts(ExprList exprs, Set<Var> bgpVars) {
+        if (exprs == null) return Map.of();
+        Map<Var, List<Expr>> result = new LinkedHashMap<>();
+        for (Expr e : exprs.getList()) collectConjuncts(e, bgpVars, result);
+        return result;
+    }
+
+    private static void collectConjuncts(Expr e, Set<Var> bgpVars, Map<Var, List<Expr>> out) {
+        if (e instanceof E_LogicalAnd and) {
+            collectConjuncts(and.getArg1(), bgpVars, out);
+            collectConjuncts(and.getArg2(), bgpVars, out);
+            return;
+        }
+        Set<Var> mentioned = e.getVarsMentioned();
+        if (mentioned.size() != 1) return;
+        Var v = mentioned.iterator().next();
+        if (!bgpVars.contains(v) || !isSingleNodeEvaluable(e, v)) return;
+        out.computeIfAbsent(v, k -> new ArrayList<>()).add(e);
+    }
+
+    /**
+     * Whether {@code e} can be decided from a single candidate node bound to {@code var}
+     * alone: built only from constants, {@code var} itself, and the whitelisted
+     * deterministic, context-free operators below — equality/inequality, numeric range
+     * comparisons, REGEX (with constant pattern/flags), DATATYPE/LANG/LANGMATCHES, and the
+     * boolean connectives combining them. Anything else — EXISTS, aggregates, custom or
+     * property functions, non-deterministic functions (RAND/NOW/UUID/BNODE), or a second
+     * variable — is rejected. Rejecting an expression only forgoes the size optimisation for
+     * it; it is always safe, since the real FILTER above the BGP evaluates it regardless.
+     */
+    private static boolean isSingleNodeEvaluable(Expr e, Var var) {
+        if (e.isConstant()) return true;
+        if (e.isVariable()) return var.equals(e.asVar());
+        if (e instanceof E_LogicalAnd f) return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_LogicalOr f)  return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_LogicalNot f) return isSingleNodeEvaluable(f.getArg(), var);
+        if (e instanceof E_Equals f)              return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_NotEquals f)            return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_LessThan f)             return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_LessThanOrEqual f)      return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_GreaterThan f)          return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_GreaterThanOrEqual f)   return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_LangMatches f)          return isSingleNodeEvaluable(f.getArg1(), var) && isSingleNodeEvaluable(f.getArg2(), var);
+        if (e instanceof E_Lang f)     return isSingleNodeEvaluable(f.getArg(), var);
+        if (e instanceof E_Datatype f) return isSingleNodeEvaluable(f.getArg(), var);
+        if (e instanceof E_Regex f) {
+            if (!isSingleNodeEvaluable(f.getArg(1), var)) return false;
+            for (int i = 2; i <= f.numArgs(); i++) if (!f.getArg(i).isConstant()) return false;
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * One visitor instance per tree node: it carries the demand reaching that node and the
      * fallback state of the enclosing subtree, computes the demand for each child, and
      * recurses. Implements {@link OpVisitor} directly (not {@code OpVisitorBase}) so every
@@ -337,12 +468,17 @@ public final class AlgebraContextAnalyzer {
         private final Optional<FallbackReason> fallback;
         private final boolean collapsible;     // multiplicities below this node cannot reach the result
         private final Analysis analysis;
+        // Single-variable filter conjuncts from a directly enclosing OpFilter, meant for the
+        // one OpBGP visited next only (see the walk() overload that carries this).
+        private final Map<Var, List<Expr>> pendingFilters;
 
-        Walker(Set<Var> demand, Optional<FallbackReason> fallback, boolean collapsible, Analysis analysis) {
+        Walker(Set<Var> demand, Optional<FallbackReason> fallback, boolean collapsible, Analysis analysis,
+               Map<Var, List<Expr>> pendingFilters) {
             this.demand = demand;
             this.fallback = fallback;
             this.collapsible = collapsible;
             this.analysis = analysis;
+            this.pendingFilters = pendingFilters;
         }
 
         private void recurse(Op child, Set<Var> childDemand) {
@@ -371,13 +507,14 @@ public final class AlgebraContextAnalyzer {
             Set<Var> all = varsOf(opBGP.getPattern());
             if (fallback.isPresent()) {
                 LOG.debug("BGP {} -> all variables {} (fallback: {})", opBGP, all, fallback.get());
-                analysis.record(opBGP, all, fallback, false);
+                analysis.record(opBGP, all, fallback, false, pendingFilters);
                 return;
             }
             Set<Var> out = new LinkedHashSet<>();
             for (Var v : all) if (demand.contains(v)) out.add(v);
-            LOG.debug("BGP {} -> output variables {} of {} (counts collapsible: {})", opBGP, out, all, collapsible);
-            analysis.record(opBGP, out, Optional.empty(), collapsible);
+            LOG.debug("BGP {} -> output variables {} of {} (counts collapsible: {}, single-var filters: {})",
+                    opBGP, out, all, collapsible, pendingFilters);
+            analysis.record(opBGP, out, Optional.empty(), collapsible, pendingFilters);
         }
 
         @Override public void visit(OpQuadPattern quadPattern) {}   // no OpBGP inside
@@ -403,7 +540,16 @@ public final class AlgebraContextAnalyzer {
 
         @Override
         public void visit(OpFilter opFilter) {
-            recurse(opFilter.getSubOp(), union(demand, exprVars(opFilter.getExprs())));
+            Set<Var> subDemand = union(demand, exprVars(opFilter.getExprs()));
+            // Filter(BGP) directly: extract single-variable conjuncts for the BGP's own
+            // matchTriple pre-filtering. A filter over anything else (a join, a project, ...)
+            // does not directly enclose any one BGP's rows, so nothing is extracted there.
+            if (opFilter.getSubOp() instanceof OpBGP bgp) {
+                Map<Var, List<Expr>> conjuncts = singleVarConjuncts(opFilter.getExprs(), varsOf(bgp.getPattern()));
+                walk(bgp, subDemand, fallback, collapsible, analysis, conjuncts);
+                return;
+            }
+            recurse(opFilter.getSubOp(), subDemand);
         }
 
         @Override

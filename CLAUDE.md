@@ -44,7 +44,19 @@ part of the tested surface.
 4. **`AlgebraContextAnalyzer`** — read-only walk of the ARQ `Op` tree, run once per query
    execution; per `OpBGP` (by object identity) it records the output variables `O` the rest of
    the plan needs and whether the BGP's row multiplicities are collapsible (a `DISTINCT` above
-   with nothing multiplicity-sensitive in between). Never rewrites the tree.
+   with nothing multiplicity-sensitive in between). Never rewrites the tree. It also records,
+   per BGP variable, the conjuncts of a *directly* enclosing `OpFilter` (`Filter(BGP)`, not a
+   filter over a join/other operator) that constrain exactly that one variable and can be
+   decided from a single candidate node for it — equality/inequality to a constant, numeric
+   range comparisons, `REGEX`, `DATATYPE`/`LANG`/`LANGMATCHES`, and `&&`/`||`/`!` combining
+   them, recognised by an explicit whitelist (`isSingleNodeEvaluable`) so an unrecognised form
+   (EXISTS, aggregates, custom/property functions, non-deterministic functions, a second
+   variable) is simply not extracted — never incorrectly. `YannakakisOpExecutor.matchTriple`
+   uses these purely as a size hint: rows failing a conjunct are never turned into `Relation`
+   rows, and an equality to a constant becomes a bound `Graph.find` position instead of a
+   post-filter when doing so is safe (see step 7). The real `FILTER` still runs, unchanged,
+   above the BGP in the ARQ plan; SPARQL FILTER semantics are never reimplemented, only
+   pre-empted for rows that would fail it regardless.
 5. **`QueryClassifier`** — classifies an acyclic BGP against `O` as relation-dominated ⊂
    free-connex ⊂ acyclic and roots the join tree accordingly (dominating relation / free-connex
    tree with connex subtree Tn / GYO root). Given cardinality estimates
@@ -92,6 +104,18 @@ triple against the active `Graph`, joins fused leaves, runs
 graph), it delegates to stock ARQ (`super.execute(...)`) unchanged. The earlier
 `YannakakisQueryEngine`/`YannakakisTransform` algebra-rewriting scaffold was deleted (step 3).
 
+`matchTriple` additionally takes the analyzer's per-variable filter conjuncts (step 4) and the
+`ExecutionContext`: for each position, an equality-to-constant conjunct becomes the bound
+`Graph.find` term instead of `Node.ANY` when the constant's RDF-term identity is guaranteed to
+coincide with SPARQL value equality (IRIs, blank nodes, literals with no datatype / `xsd:string`
+/ a language tag) — value-based datatypes (numeric, boolean, date/time) are excluded, since two
+of their nodes can be SPARQL-equal without being identical terms (`"1"` vs `"01"` as
+`xsd:integer`), so pushing those into `find()` could silently miss matches. Every conjunct
+(pushed down or not) is also checked per candidate node via `Expr.isSatisfied` — the same call
+ARQ's own `FILTER` uses — before the row is ever added to the `Relation`; since a conjunct
+mentions no variable but that one position's, this can never reject a row the real `FILTER`
+above the BGP would keep. That real `FILTER` still runs there, unchanged.
+
 ### Testing strategy
 
 There are no external RDF/query fixture files — every model and query is built inline in Java
@@ -124,7 +148,15 @@ There are no external RDF/query fixture files — every model and query is built
   and includes a **randomized/property-based suite** (fixed seed `20260706L`, 30 rounds, plus a
   projected variant) that generates random acyclic BGPs and matching random graphs and diffs
   both engines — this is the test to extend when changing core join/semijoin behavior, since
-  it's the main defense against regressions the fixed example queries wouldn't catch.
+  it's the main defense against regressions the fixed example queries wouldn't catch. A
+  `SingleVarFilterPushdown` group covers the step-4/step-7 filter pre-filtering: equality to a
+  safe constant (pushed into `Graph.find`), equality to a numeric constant with an alternate
+  lexical form in the data (`"01"^^xsd:integer = 1`, pinned so a naive node-identity pushdown
+  regression would be caught), `REGEX`, a numeric range split from a top-level `&&`,
+  `DATATYPE`/`LANG`, and a two-variable filter (never pushed down, still correct).
+  `AlgebraContextAnalyzerTest` separately checks the conjunct extraction itself: splitting
+  `&&`, rejecting a two-variable or unwhitelisted (e.g. `BOUND`) conjunct, and that a filter
+  not *directly* over a BGP (over a join instead) extracts nothing for either side.
 
 ## Hard rules
 
@@ -168,7 +200,22 @@ There are no external RDF/query fixture files — every model and query is built
 - `QueryIterRoot` exists for instanceof checks.
 - `BindingFactory.builder(Binding parent)` exists.
   `BindingFactory.empty()` is the empty root binding.
+  `BindingFactory.binding(Var, Node)` also exists (a single-pair binding).
 - `ExprVars.varsMentioned` works with `opFilter.getExprs()`.
+- `Expr.isSatisfied(Binding, FunctionEnv)` never throws (errors/EBV -> false);
+  `Expr.eval(Binding, FunctionEnv)` can throw `ExprEvalException`. `Expr.isConstant()`/
+  `getConstant()`, `isVariable()`/`asVar()`/`getVarsMentioned()` exist directly on `Expr`.
+  `ExecutionContext implements FunctionEnv`.
+- `ExprFunction1.getArg()`, `ExprFunction2.getArg1()`/`getArg2()`,
+  `ExprFunctionN.getArg(int)` (1-indexed, returns `null` past the actual arg count) and
+  `numArgs()` exist; `E_Regex extends ExprFunctionN` with args (text, pattern, [flags]),
+  `E_Equals`/`E_NotEquals`/`E_LessThan(OrEqual)`/`E_GreaterThan(OrEqual)`/`E_LogicalAnd`/
+  `E_LogicalOr`/`E_LangMatches` extend `ExprFunction2`, `E_LogicalNot`/`E_Lang`/`E_Datatype`
+  extend `ExprFunction1`.
+- `NodeValue.asNode()` forces a `NodeValue` to its `Node` form; `NodeValue.sameValueAs` is
+  SPARQL `=` (value equality), distinct from `Node.equals` (term identity) — the two coincide
+  only for IRIs, blank nodes, and string-like literals (no datatype / `xsd:string` / a
+  language tag), not for numeric/boolean/date-time datatypes.
 - `opProject.getVars()` returns `List<Var>`.
 - `Query.setDistinct(boolean)` / `isDistinct()` exist; `Query.toString()`
   re-serializes to SPARQL text.
